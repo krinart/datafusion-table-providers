@@ -157,10 +157,7 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(builder))
         }
-        DataType::List(field) => {
-            let values_builder = create_arrow_builder_for_field(field, capacity * 4)?;
-            Ok(Box::new(ListBuilder::new(values_builder)))
-        }
+        DataType::List(field) => create_list_builder_for_field(field, capacity),
         DataType::Struct(fields) => {
             let mut field_builders = Vec::new();
             for field in fields {
@@ -190,6 +187,88 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             Ok(Box::new(StringBuilder::with_capacity(capacity, 1024)))
         }
     }
+}
+
+fn create_list_builder_for_field(inner_field: &Field, capacity: usize) -> Result<Box<dyn ArrayBuilder>> {
+    println!("Creating list builder for field: {:?}", inner_field);
+    match inner_field.data_type() {
+        DataType::Boolean => {
+            let values_builder: Box<dyn ArrayBuilder> = Box::new(BooleanBuilder::with_capacity(capacity * 4));
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Int8 => {
+            let values_builder: Box<dyn ArrayBuilder> = Box::new(Int8Builder::with_capacity(capacity * 4));
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Int16 => {
+            let values_builder = Int16Builder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Int32 => {
+            let values_builder = Int32Builder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Int64 => {
+            let values_builder = Int64Builder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Float32 => {
+            let values_builder = Float32Builder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Float64 => {
+            let values_builder = Float64Builder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Utf8 => {
+            let values_builder = StringBuilder::with_capacity(capacity * 4, 1024);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::LargeUtf8 => {
+            let values_builder = LargeStringBuilder::with_capacity(capacity * 4, 1024);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Binary => {
+            let values_builder = BinaryBuilder::with_capacity(capacity * 4, 1024);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Date32 => {
+            let values_builder = Date32Builder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Time64(TimeUnit::Nanosecond) => {
+            let values_builder = Time64NanosecondBuilder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Timestamp(TimeUnit::Microsecond, _) => {
+            let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Decimal128(precision, scale) => {
+            let values_builder =
+                Decimal128Builder::with_capacity(capacity * 4)
+                    .with_precision_and_scale(*precision, *scale)
+                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Decimal256(precision, scale) => {
+            let values_builder =
+                Decimal256Builder::with_capacity(capacity * 4)
+                    .with_precision_and_scale(*precision, *scale)
+                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Null => {
+            let values_builder = NullBuilder::new();
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        _ => {
+            // Fallback to string for unsupported inner types
+            let values_builder = StringBuilder::with_capacity(capacity * 4, 1024);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+    }
+
 }
 
 fn append_row_to_builders(
@@ -642,47 +721,249 @@ fn append_decimal256_value(builder: &mut Decimal256Builder, value: Option<&Value
 fn append_list_value(builder: &mut dyn ArrayBuilder, value: Option<&Value>) -> Result<()> {
     match value {
         Some(v) if v.is_null() => {
-            // We need to figure out what type of list builder this is
-            // For now, let's assume it's a string list (most common case)
-            if let Some(list_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<ListBuilder<StringBuilder>>()
-            {
-                list_builder.append_null();
-            }
+            append_null_to_list_builder(builder)?;
         }
         Some(Value::Array(arr)) => {
-            if let Some(list_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<ListBuilder<StringBuilder>>()
-            {
-                for item in arr {
-                    match item {
-                        Value::String(s) => list_builder.values().append_value(s),
-                        other => list_builder
-                            .values()
-                            .append_value(&serde_json::to_string(other).unwrap_or_default()),
-                    }
-                }
-                list_builder.append(true);
-            }
+            append_array_to_list_builder(builder, arr)?;
         }
         Some(_) => {
-            if let Some(list_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<ListBuilder<StringBuilder>>()
-            {
-                list_builder.append_null();
-            }
+            append_null_to_list_builder(builder)?;
         }
         None => {
-            if let Some(list_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<ListBuilder<StringBuilder>>()
-            {
-                list_builder.append_null();
+            append_null_to_list_builder(builder)?;
+        }
+    }
+    Ok(())
+}
+
+fn append_null_to_list_builder(builder: &mut dyn ArrayBuilder) -> Result<()> {
+    // Try to downcast to various list builder types
+    if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<StringBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<LargeStringBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<BooleanBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int8Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int16Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int32Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int64Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Float32Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Float64Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<BinaryBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Date32Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Time64NanosecondBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<TimestampMicrosecondBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Decimal128Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Decimal256Builder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<NullBuilder>>()
+    {
+        list_builder.append_null();
+    } else {
+        return Err(Error::BuilderDowncastError {
+            expected: "ListBuilder<T>".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>) -> Result<()> {
+    // Handle different list builder types
+    if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<StringBuilder>>()
+    {
+        for item in arr {
+            append_string_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<LargeStringBuilder>>()
+    {
+        for item in arr {
+            append_large_string_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<BooleanBuilder>>()
+    {
+        for item in arr {
+            match item {
+                Value::Bool(b) => list_builder.values().append_value(*b),
+                Value::Null => list_builder.values().append_null(),
+                _ => list_builder.values().append_null(),
             }
         }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int8Builder>>()
+    {
+        for item in arr {
+            append_int8_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int16Builder>>()
+    {
+        for item in arr {
+            append_int16_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int32Builder>>()
+    {
+        for item in arr {
+            append_int32_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Int64Builder>>()
+    {
+        for item in arr {
+            append_int64_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Float32Builder>>()
+    {
+        for item in arr {
+            append_float32_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Float64Builder>>()
+    {
+        for item in arr {
+            append_float64_value(list_builder.values(), Some(item));
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<BinaryBuilder>>()
+    {
+        for item in arr {
+            append_binary_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Date32Builder>>()
+    {
+        for item in arr {
+            append_date32_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Time64NanosecondBuilder>>()
+    {
+        for item in arr {
+            append_time64_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<TimestampMicrosecondBuilder>>()
+    {
+        for item in arr {
+            append_timestamp_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Decimal128Builder>>()
+    {
+        for item in arr {
+            append_decimal128_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Decimal256Builder>>()
+    {
+        for item in arr {
+            append_decimal256_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<NullBuilder>>()
+    {
+        for _ in arr {
+            list_builder.values().append_null();
+        }
+        list_builder.append(true);
+    } else {
+        return Err(Error::BuilderDowncastError {
+            expected: "ListBuilder<T>".to_string(),
+        });
     }
     Ok(())
 }
