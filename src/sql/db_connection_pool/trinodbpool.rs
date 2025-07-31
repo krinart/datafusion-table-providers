@@ -25,11 +25,6 @@ pub enum Error {
     #[snafu(display("Trino connection failed.\n{source}\nFor details, refer to the Trino documentation: https://trino.io/docs/"))]
     TrinoConnectionError { source: reqwest::Error },
 
-    #[snafu(display(
-        "Invalid parameter: {parameter_name}. Ensure the parameter name is correct."
-    ))]
-    InvalidParameterError { parameter_name: String },
-
     #[snafu(display("Could not parse {parameter_name} into a valid integer. Ensure it is configured with a valid value."))]
     InvalidIntegerParameterError {
         parameter_name: String,
@@ -53,7 +48,7 @@ pub enum Error {
     MissingRequiredParameter { parameter_name: String },
 
     #[snafu(display("Failed to build HTTP client: {source}"))]
-    FailedToBuildHttpClient { source: reqwest::Error },
+    FailedToBuildTrinoHttpClient { source: reqwest::Error },
 
     #[snafu(display("Trino server error: {status_code} - {message}"))]
     TrinoServerError { status_code: u16, message: String },
@@ -103,10 +98,8 @@ impl TrinoConnectionPool {
     ///
     /// Returns an error if there is a problem creating the connection pool.
     pub async fn new(params: HashMap<String, SecretString>) -> Result<Self> {
-        // Remove the "trino_" prefix from the keys to keep backward compatibility
         let params = util::remove_prefix_from_hashmap_keys(params, "trino_");
 
-        // Build the base URL
         let base_url = if let Some(url) = params.get("url").map(SecretBox::expose_secret) {
             if !url.starts_with("http://") && !url.starts_with("https://") {
                 return Err(Error::InvalidTrinoUrl {
@@ -131,7 +124,6 @@ impl TrinoConnectionPool {
                     parameter_name: "port",
                 })?;
 
-            // Verify connectivity
             verify_ns_lookup_and_tcp_connect(host, port)
                 .await
                 .context(InvalidHostOrPortSnafu { host, port })?;
@@ -207,7 +199,7 @@ impl TrinoConnectionPool {
 
         let client = client_builder
             .build()
-            .context(FailedToBuildHttpClientSnafu)?;
+            .context(FailedToBuildTrinoHttpClientSnafu)?;
 
         // Test the connection
         Self::test_connection(&client, &base_url).await?;

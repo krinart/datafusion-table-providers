@@ -45,9 +45,6 @@ pub enum Error {
     #[snafu(display("Trino server error: {status_code} - {message}"))]
     TrinoServerError { status_code: u16, message: String },
 
-    #[snafu(display("Failed to parse Trino response: {source}"))]
-    ResponseParseError { source: serde_json::Error },
-
     #[snafu(display("Unsupported data type '{data_type}' for field '{column_name}'.\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
     UnsupportedDataTypeError {
         column_name: String,
@@ -55,10 +52,7 @@ pub enum Error {
     },
 
     #[snafu(display("Failed to find the field '{field}'.\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
-    MissingField { field: String },
-
-    #[snafu(display("Invalid Trino URL: {url}"))]
-    InvalidUrl { url: String },
+    MissingFieldError { field: String },
 }
 
 pub struct TrinoConnection {
@@ -114,7 +108,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                     row_data[0]
                         .as_str()
                         .ok_or_else(|| super::Error::UnableToGetSchema {
-                            source: Box::new(Error::MissingField {
+                            source: Box::new(Error::MissingFieldError {
                                 field: "column_name".to_string(),
                             }),
                         })?;
@@ -123,7 +117,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                     row_data[1]
                         .as_str()
                         .ok_or_else(|| super::Error::UnableToGetSchema {
-                            source: Box::new(Error::MissingField {
+                            source: Box::new(Error::MissingFieldError {
                                 field: "data_type".to_string(),
                             }),
                         })?;
@@ -211,10 +205,6 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 
 impl TrinoConnection {
     pub fn new_with_config(client: Arc<reqwest::Client>, base_url: String) -> Result<Self, Error> {
-        if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-            return Err(Error::InvalidUrl { url: base_url });
-        }
-
         Ok(TrinoConnection {
             client,
             base_url,
