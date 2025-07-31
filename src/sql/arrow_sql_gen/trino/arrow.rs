@@ -1063,3 +1063,566 @@ fn append_struct_value(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::array::*;
+    use serde_json::{json, Value};
+
+    fn create_test_columns(columns: Vec<(&str, &str)>) -> Vec<TrinoColumn> {
+        columns
+            .into_iter()
+            .map(|(name, type_name)| TrinoColumn {
+                name: name.to_string(),
+                type_name: type_name.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_empty_rows_empty_columns() {
+        let rows: Vec<Vec<Value>> = vec![];
+        let columns: Vec<TrinoColumn> = vec![];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 0);
+        assert_eq!(result.num_columns(), 0);
+    }
+
+    #[test]
+    fn test_empty_rows_with_columns() {
+        let rows: Vec<Vec<Value>> = vec![];
+        let columns = create_test_columns(vec![
+            ("id", "bigint"),
+            ("name", "varchar"),
+            ("active", "boolean"),
+        ]);
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 0);
+        assert_eq!(result.num_columns(), 3);
+
+        let schema = result.schema();
+        assert_eq!(schema.field(0).name(), "id");
+        assert_eq!(schema.field(1).name(), "name");
+        assert_eq!(schema.field(2).name(), "active");
+    }
+
+    #[test]
+    fn test_basic_data_types() {
+        let columns = create_test_columns(vec![
+            ("bool_col", "boolean"),
+            ("int8_col", "tinyint"),
+            ("int16_col", "smallint"),
+            ("int32_col", "integer"),
+            ("int64_col", "bigint"),
+            ("float32_col", "real"),
+            ("float64_col", "double"),
+            ("string_col", "varchar"),
+        ]);
+
+        let rows = vec![
+            vec![
+                json!(true),
+                json!(127),
+                json!(32767),
+                json!(2147483647),
+                json!(9223372036854775807i64),
+                json!(3.14f32),
+                json!(2.718281828),
+                json!("hello"),
+            ],
+            vec![
+                json!(false),
+                json!(-128),
+                json!(-32768),
+                json!(-2147483648i64),
+                json!(-9223372036854775808i64),
+                json!(-1.23f32),
+                json!(-9.876543210),
+                json!("world"),
+            ],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 2);
+        assert_eq!(result.num_columns(), 8);
+
+        // Verify boolean column
+        let bool_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        assert_eq!(bool_array.value(0), true);
+        assert_eq!(bool_array.value(1), false);
+
+        // Verify string column
+        let string_array = result
+            .column(7)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(string_array.value(0), "hello");
+        assert_eq!(string_array.value(1), "world");
+    }
+
+    #[test]
+    fn test_null_values() {
+        let columns = create_test_columns(vec![
+            ("nullable_int", "integer"),
+            ("nullable_string", "varchar"),
+            ("nullable_bool", "boolean"),
+        ]);
+
+        let rows = vec![
+            vec![json!(42), json!("test"), json!(true)],
+            vec![Value::Null, Value::Null, Value::Null],
+            vec![json!(100), json!("another"), json!(false)],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+
+        // Check int column nulls
+        let int_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        assert!(!int_array.is_null(0));
+        assert!(int_array.is_null(1));
+        assert!(!int_array.is_null(2));
+        assert_eq!(int_array.value(0), 42);
+        assert_eq!(int_array.value(2), 100);
+
+        // Check string column nulls
+        let string_array = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert!(!string_array.is_null(0));
+        assert!(string_array.is_null(1));
+        assert!(!string_array.is_null(2));
+    }
+
+    #[test]
+    fn test_date_and_time_types() {
+        let columns = create_test_columns(vec![
+            ("date_col", "date"),
+            ("time_col", "time"),
+            ("timestamp_col", "timestamp"),
+        ]);
+
+        let rows = vec![vec![
+            json!("2023-12-25"),
+            json!("14:30:45.123456789"),
+            json!("2023-12-25T14:30:45.123456Z"),
+        ]];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1);
+
+        let date_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<Date32Array>()
+            .unwrap();
+        assert!(!date_array.is_null(0));
+
+        let time_array = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<Time64NanosecondArray>()
+            .unwrap();
+        assert!(!time_array.is_null(0));
+
+        let timestamp_array = result
+            .column(2)
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .unwrap();
+        assert!(!timestamp_array.is_null(0));
+    }
+
+    #[test]
+    fn test_invalid_date_format() {
+        let columns = create_test_columns(vec![("date_col", "date")]);
+        let rows = vec![vec![json!("invalid-date")]];
+
+        let result = rows_to_arrow(&rows, &columns);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_time_format() {
+        let columns = create_test_columns(vec![("time_col", "time")]);
+        let rows = vec![vec![json!("invalid-time")]];
+
+        let result = rows_to_arrow(&rows, &columns);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decimal_types() {
+        let columns = create_test_columns(vec![
+            ("decimal128_col", "decimal(10,2)"),
+            ("decimal256_col", "decimal(42,4)"),
+        ]);
+
+        let rows = vec![vec![json!("123.45"), json!("999999999999.9999")]];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1);
+
+        let decimal128_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        assert!(!decimal128_array.is_null(0));
+
+        let decimal256_array = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<Decimal256Array>()
+            .unwrap();
+        assert!(!decimal256_array.is_null(0));
+    }
+
+    #[test]
+    fn test_invalid_decimal_format() {
+        let columns = create_test_columns(vec![("decimal_col", "decimal(10,2)")]);
+        let rows = vec![vec![json!("not-a-number")]];
+
+        let result = rows_to_arrow(&rows, &columns);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_binary_data() {
+        let columns = create_test_columns(vec![("binary_col", "varbinary")]);
+
+        let base64_data = base64::encode(b"hello world");
+        let rows = vec![
+            vec![json!(base64_data)],
+            vec![json!("plain text")],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 2);
+
+        let binary_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        assert!(!binary_array.is_null(0));
+        assert!(!binary_array.is_null(1));
+    }
+
+    #[test]
+    fn test_list_type() {
+        let columns = create_test_columns(vec![("list_col", "array(varchar)")]);
+
+        let rows = vec![
+            vec![json!(["item1", "item2", "item3"])],
+            vec![json!(["single"])],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+    }
+
+    #[test]
+    fn test_struct_type() {
+        let columns = create_test_columns(vec![("struct_col", "row(name varchar, age integer)")]);
+
+        let rows = vec![
+            vec![json!({"name": "Alice", "age": 30})],
+            vec![json!(["Bob", 25])], // Array format
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+    }
+
+    #[test]
+    fn test_map_type() {
+        let columns = create_test_columns(vec![("map_col", "map(varchar, integer)")]);
+
+        let rows = vec![
+            vec![json!({"key1": 1, "key2": 2})],
+            vec![json!([{"key": "key3", "value": 3}])], // Array of key-value pairs
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+    }
+
+    #[test]
+    fn test_integer_overflow_handling() {
+        let columns = create_test_columns(vec![
+            ("int8_col", "tinyint"),
+            ("int16_col", "smallint"),
+            ("int32_col", "integer"),
+        ]);
+
+        // Values that exceed the respective integer type limits
+        let rows = vec![vec![
+            json!(1000), // Exceeds i8::MAX (127)
+            json!(100000), // Exceeds i16::MAX (32767)
+            json!(9223372036854775807i64), // Exceeds i32::MAX
+        ]];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1);
+
+        // These should be null due to overflow
+        let int8_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int8Array>()
+            .unwrap();
+        assert!(int8_array.is_null(0));
+
+        let int16_array = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+        assert!(int16_array.is_null(0));
+
+        let int32_array = result
+            .column(2)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        assert!(int32_array.is_null(0));
+    }
+
+    #[test]
+    fn test_type_coercion_fallback() {
+        let columns = create_test_columns(vec![
+            ("bool_col", "boolean"),
+            ("int_col", "integer"),
+            ("string_col", "varchar"),
+        ]);
+
+        // Send wrong types - these should mostly become nulls or coerced
+        let rows = vec![vec![
+            json!("not a boolean"), // Wrong type for boolean
+            json!("not a number"),  // Wrong type for integer
+            json!(42),              // Number for string (should be coerced)
+        ]];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1);
+
+        // Boolean with wrong type should be null
+        let bool_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        assert!(bool_array.is_null(0));
+
+        // Integer with wrong type should be null
+        let int_array = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        assert!(int_array.is_null(0));
+
+        // Number should be coerced to string
+        let string_array = result
+            .column(2)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert!(!string_array.is_null(0));
+        assert_eq!(string_array.value(0), "42");
+    }
+
+    #[test]
+    fn test_large_dataset() {
+        let columns = create_test_columns(vec![
+            ("id", "bigint"),
+            ("value", "varchar"),
+        ]);
+
+        // Create 1000 rows of test data
+        let mut rows = Vec::new();
+        for i in 0..1000 {
+            rows.push(vec![json!(i), json!(format!("value_{}", i))]);
+        }
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1000);
+        assert_eq!(result.num_columns(), 2);
+
+        // Verify first and last rows
+        let id_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        assert_eq!(id_array.value(0), 0);
+        assert_eq!(id_array.value(999), 999);
+
+        let value_array = result
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(value_array.value(0), "value_0");
+        assert_eq!(value_array.value(999), "value_999");
+    }
+
+    #[test]
+    fn test_mixed_null_and_valid_data() {
+        let columns = create_test_columns(vec![
+            ("mixed_int", "integer"),
+            ("mixed_string", "varchar"),
+        ]);
+
+        let rows = vec![
+            vec![json!(1), json!("first")],
+            vec![Value::Null, json!("second")],
+            vec![json!(3), Value::Null],
+            vec![Value::Null, Value::Null],
+            vec![json!(5), json!("fifth")],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 5);
+
+        let int_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+
+        // Check null pattern
+        assert!(!int_array.is_null(0));
+        assert!(int_array.is_null(1));
+        assert!(!int_array.is_null(2));
+        assert!(int_array.is_null(3));
+        assert!(!int_array.is_null(4));
+
+        // Check values
+        assert_eq!(int_array.value(0), 1);
+        assert_eq!(int_array.value(2), 3);
+        assert_eq!(int_array.value(4), 5);
+    }
+
+    #[test]
+    fn test_row_column_count_mismatch() {
+        let columns = create_test_columns(vec![
+            ("col1", "integer"),
+            ("col2", "varchar"),
+            ("col3", "boolean"),
+        ]);
+
+        // Row with fewer values than columns
+        let rows = vec![
+            vec![json!(1), json!("test")], // Missing third column
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1);
+        assert_eq!(result.num_columns(), 3);
+
+        // The missing column should be null
+        let bool_array = result
+            .column(2)
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+        assert!(bool_array.is_null(0));
+    }
+
+    #[test]
+    fn test_null_builder_type() {
+        let columns = create_test_columns(vec![("null_col", "null")]);
+        let rows = vec![vec![Value::Null], vec![Value::Null]];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 2);
+        assert_eq!(result.num_columns(), 1);
+
+        let null_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<NullArray>()
+            .unwrap();
+        assert_eq!(null_array.len(), 2);
+    }
+
+    #[test]
+    fn test_edge_case_timestamps() {
+        let columns = create_test_columns(vec![("ts_col", "timestamp")]);
+
+        let rows = vec![
+            vec![json!("2023-01-01T00:00:00Z")],
+            vec![json!("2023-12-31 23:59:59.999999")],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+
+        let ts_array = result
+            .column(0)
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .unwrap();
+
+        assert!(!ts_array.is_null(0));
+        assert!(!ts_array.is_null(1));
+        assert!(ts_array.is_null(2));
+    }
+
+    #[test]
+    fn test_schema_building() {
+        let columns = create_test_columns(vec![
+            ("field1", "bigint"),
+            ("field2", "varchar"),
+            ("field3", "boolean"),
+        ]);
+
+        let schema = build_schema_from_columns(&columns).unwrap();
+
+        assert_eq!(schema.fields().len(), 3);
+        assert_eq!(schema.field(0).name(), "field1");
+        assert_eq!(schema.field(1).name(), "field2");
+        assert_eq!(schema.field(2).name(), "field3");
+
+        // All fields should be nullable
+        assert!(schema.field(0).is_nullable());
+        assert!(schema.field(1).is_nullable());
+        assert!(schema.field(2).is_nullable());
+    }
+
+    #[test]
+    fn test_complex_nested_struct() {
+        let columns = create_test_columns(vec![
+            ("nested_struct", "row(person row(name varchar, age integer), active boolean)")
+        ]);
+
+        let rows = vec![vec![json!({
+            "person": {"name": "John", "age": 30},
+            "active": true
+        })]];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1);
+        assert_eq!(result.num_columns(), 1);
+    }
+}
