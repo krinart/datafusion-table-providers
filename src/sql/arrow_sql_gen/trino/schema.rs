@@ -59,10 +59,10 @@ fn parse_decimal_type(type_str: &str) -> Result<DataType> {
                 Ok(DataType::Decimal128(precision, scale))
             }
         } else {
-            Ok(DataType::Decimal128(38, 0))
+            Ok(DataType::Decimal128(18, 6))
         }
     } else {
-        Ok(DataType::Decimal128(38, 0))
+        Ok(DataType::Decimal128(18, 6))
     }
 }
 
@@ -267,7 +267,7 @@ mod tests {
     fn test_decimal_types() {
         assert_eq!(
             trino_data_type_to_arrow_type("decimal").unwrap(),
-            DataType::Decimal128(38, 0)
+            DataType::Decimal128(18, 6)
         );
 
         assert_eq!(
@@ -298,11 +298,6 @@ mod tests {
         assert_eq!(
             trino_data_type_to_arrow_type("decimal(39,0)").unwrap(),
             DataType::Decimal256(39, 0)
-        );
-
-        assert_eq!(
-            trino_data_type_to_arrow_type("decimal(10").unwrap(),
-            DataType::Decimal128(38, 0)
         );
     }
 

@@ -16,6 +16,8 @@ use chrono::{NaiveDate, NaiveTime, Timelike};
 use serde_json::Value;
 use snafu::ResultExt;
 use std::{collections::HashMap, sync::Arc};
+use std::any::Any;
+use arrow_schema::ArrowError;
 
 #[derive(Debug, Clone)]
 pub struct TrinoColumn {
@@ -48,8 +50,6 @@ pub fn rows_to_arrow(rows: &[Vec<Value>], columns: &Vec<TrinoColumn>) -> Result<
 
     let arrays = finish_builders(builders, &schema)?;
 
-    println!("schema: {:?}", schema);
-
     RecordBatch::try_new(Arc::new(schema), arrays).context(FailedToBuildRecordBatchSnafu)
 }
 
@@ -81,7 +81,7 @@ fn create_empty_array(data_type: &DataType) -> ArrayRef {
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
             Arc::new(TimestampMicrosecondBuilder::new().finish())
         }
-        DataType::Decimal128(_, _) => Arc::new(Decimal128Builder::new().finish()),
+        DataType::Decimal128(precision, scale) => Arc::new(Decimal128Builder::new().finish()),
         DataType::Decimal256(_, _) => Arc::new(Decimal256Builder::new().finish()),
         DataType::List(_) => {
             let values_builder: Box<dyn ArrayBuilder> = Box::new(StringBuilder::new());
@@ -148,14 +148,12 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             TimestampMicrosecondBuilder::with_capacity(capacity),
         )),
         DataType::Decimal128(precision, scale) => {
-            let builder = Decimal128Builder::with_capacity(capacity)
-                .with_precision_and_scale(*precision, *scale)
+            let builder = Decimal128BuilderWrapper::new(capacity, *precision, *scale)
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(builder))
         }
         DataType::Decimal256(precision, scale) => {
-            let builder = Decimal256Builder::with_capacity(capacity)
-                .with_precision_and_scale(*precision, *scale)
+            let builder = Decimal256BuilderWrapper::new(capacity, *precision, *scale)
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(builder))
         }
@@ -191,10 +189,143 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
     }
 }
 
+struct Decimal128BuilderWrapper {
+    inner: Box<Decimal128Builder>,
+    precision: u8,
+    scale: i8,
+}
+
+impl Decimal128BuilderWrapper {
+    fn new(capacity: usize, precision: u8, scale: i8) -> std::result::Result<Self, ArrowError> {
+        let inner = Decimal128Builder::with_capacity(capacity)
+            .with_precision_and_scale(precision, scale)?;
+
+        Ok(Self {
+            inner: Box::new(inner),
+            precision,
+            scale,
+        })
+    }
+
+    fn append_value(&mut self, value: i128) {
+        self.inner.append_value(value);
+    }
+
+    fn append_null(&mut self) {
+        self.inner.append_null();
+    }
+
+    fn precision(&self) -> u8 {
+        self.precision
+    }
+
+    fn scale(&self) -> i8 {
+        self.scale
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::Decimal128(self.precision, self.scale)
+    }
+}
+
+impl ArrayBuilder for Decimal128BuilderWrapper {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn finish(&mut self) -> ArrayRef {
+        Arc::new(self.inner.finish())
+    }
+
+    fn finish_cloned(&self) -> ArrayRef {
+        Arc::new(self.inner.finish_cloned())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn into_box_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
+struct Decimal256BuilderWrapper {
+    inner: Box<Decimal256Builder>,
+    precision: u8,
+    scale: i8,
+}
+
+impl Decimal256BuilderWrapper {
+    fn new(capacity: usize, precision: u8, scale: i8) -> std::result::Result<Self, ArrowError> {
+        let inner = Decimal256Builder::with_capacity(capacity)
+            .with_precision_and_scale(precision, scale)?;
+
+        Ok(Self {
+            inner: Box::new(inner),
+            precision,
+            scale,
+        })
+    }
+
+    fn append_value(&mut self, value: i256) {
+        self.inner.append_value(value);
+    }
+
+    fn append_null(&mut self) {
+        self.inner.append_null();
+    }
+
+    fn precision(&self) -> u8 {
+        self.precision
+    }
+
+    fn scale(&self) -> i8 {
+        self.scale
+    }
+
+    fn data_type(&self) -> DataType {
+        DataType::Decimal256(self.precision, self.scale)
+    }
+}
+
+impl ArrayBuilder for Decimal256BuilderWrapper {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn finish(&mut self) -> ArrayRef {
+        Arc::new(self.inner.finish())
+    }
+
+    fn finish_cloned(&self) -> ArrayRef {
+        Arc::new(self.inner.finish_cloned())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn into_box_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
 fn create_list_builder_for_field(
     inner_field: &Field,
     capacity: usize,
 ) -> Result<Box<dyn ArrayBuilder>> {
+    // let values_builder = create_arrow_builder_for_field(inner_field, capacity);
+    // Ok(Box::new(ListBuilder::new(values_builder)))
+
     match inner_field.data_type() {
         DataType::Boolean => {
             let values_builder: Box<dyn ArrayBuilder> =
@@ -251,14 +382,12 @@ fn create_list_builder_for_field(
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Decimal128(precision, scale) => {
-            let values_builder = Decimal128Builder::with_capacity(capacity * 4)
-                .with_precision_and_scale(*precision, *scale)
+            let values_builder = Decimal128BuilderWrapper::new(capacity * 4, *precision, *scale)
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Decimal256(precision, scale) => {
-            let values_builder = Decimal256Builder::with_capacity(capacity * 4)
-                .with_precision_and_scale(*precision, *scale)
+            let values_builder = Decimal256BuilderWrapper::new(capacity * 4, *precision, *scale)
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
@@ -421,18 +550,18 @@ fn append_value_to_builder(
         DataType::Decimal128(_, _) => {
             let decimal_builder = builder
                 .as_any_mut()
-                .downcast_mut::<Decimal128Builder>()
+                .downcast_mut::<Decimal128BuilderWrapper>()
                 .ok_or_else(|| Error::BuilderDowncastError {
-                    expected: "Decimal128Builder".to_string(),
+                    expected: "Decimal128BuilderWrapper".to_string(),
                 })?;
             append_decimal128_value(decimal_builder, value)?;
         }
         DataType::Decimal256(_, _) => {
             let decimal_builder = builder
                 .as_any_mut()
-                .downcast_mut::<Decimal256Builder>()
+                .downcast_mut::<Decimal256BuilderWrapper>()
                 .ok_or_else(|| Error::BuilderDowncastError {
-                    expected: "Decimal256Builder".to_string(),
+                    expected: "Decimal256BuilderWrapper".to_string(),
                 })?;
             append_decimal256_value(decimal_builder, value)?;
         }
@@ -447,9 +576,6 @@ fn append_value_to_builder(
                     expected: "StructBuilder".to_string(),
                 })?;
             append_struct_value(struct_builder, value, fields)?;
-        }
-        DataType::Map(_, _) => {
-            append_map_value(builder, value)?;
         }
         DataType::Null => {
             let null_builder = builder
@@ -680,15 +806,28 @@ fn append_timestamp_value(
     Ok(())
 }
 
-fn append_decimal128_value(builder: &mut Decimal128Builder, value: Option<&Value>) -> Result<()> {
+fn append_decimal128_value(builder: &mut Decimal128BuilderWrapper, value: Option<&Value>) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(decimal_str)) => {
             if let Ok(big_decimal) = decimal_str.parse::<BigDecimal>() {
-                if let Some(decimal_value) = big_decimal.to_i128() {
-                    builder.append_value(decimal_value);
+                // Get precision and scale from the builder's data type
+                if let DataType::Decimal128(_, scale) = builder.data_type() {
+                    let scale_factor = BigDecimal::from(10_i128.pow(scale as u32));
+                    let scaled_decimal = big_decimal * scale_factor;
+
+                    if let Some(decimal_value) = scaled_decimal.to_i128() {
+                        builder.append_value(decimal_value);
+                    } else {
+                        builder.append_null();
+                    }
                 } else {
-                    builder.append_null();
+                    // Fallback - use the original value
+                    if let Some(decimal_value) = big_decimal.to_i128() {
+                        builder.append_value(decimal_value);
+                    } else {
+                        builder.append_null();
+                    }
                 }
             } else {
                 return Err(Error::FailedToParseDecimal {
@@ -702,13 +841,20 @@ fn append_decimal128_value(builder: &mut Decimal128Builder, value: Option<&Value
     Ok(())
 }
 
-fn append_decimal256_value(builder: &mut Decimal256Builder, value: Option<&Value>) -> Result<()> {
+fn append_decimal256_value(builder: &mut Decimal256BuilderWrapper, value: Option<&Value>) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(decimal_str)) => {
             if let Ok(big_decimal) = decimal_str.parse::<BigDecimal>() {
-                let decimal_value = to_decimal_256(&big_decimal);
-                builder.append_value(decimal_value);
+                // Get precision and scale from the builder's data type
+                if let DataType::Decimal256(_, scale) = builder.data_type() {
+                    let scale_factor = BigDecimal::from(10_i128.pow(scale as u32));
+                    let scaled_decimal = big_decimal * scale_factor;
+                    builder.append_value(to_decimal_256(&scaled_decimal));
+                } else {
+                    // Fallback - use the original value
+                    builder.append_value(to_decimal_256(&big_decimal));
+                }
             } else {
                 return Err(Error::FailedToParseDecimal {
                     value: decimal_str.to_string(),
@@ -941,7 +1087,7 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
         list_builder.append(true);
     } else if let Some(list_builder) = builder
         .as_any_mut()
-        .downcast_mut::<ListBuilder<Decimal128Builder>>()
+        .downcast_mut::<ListBuilder<Decimal128BuilderWrapper>>()
     {
         for item in arr {
             append_decimal128_value(list_builder.values(), Some(item))?;
@@ -949,7 +1095,7 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
         list_builder.append(true);
     } else if let Some(list_builder) = builder
         .as_any_mut()
-        .downcast_mut::<ListBuilder<Decimal256Builder>>()
+        .downcast_mut::<ListBuilder<Decimal256BuilderWrapper>>()
     {
         for item in arr {
             append_decimal256_value(list_builder.values(), Some(item))?;
@@ -967,97 +1113,6 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
         return Err(Error::BuilderDowncastError {
             expected: "ListBuilder<T>".to_string(),
         });
-    }
-    Ok(())
-}
-
-fn append_map_value(builder: &mut dyn ArrayBuilder, value: Option<&Value>) -> Result<()> {
-    // Similar to list, this needs type-specific handling
-    // For now, we'll handle the most common case
-    match value {
-        Some(v) if v.is_null() => {
-            // Try to downcast to common map types
-            if let Some(map_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
-            {
-                map_builder
-                    .append(false)
-                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
-            }
-        }
-        Some(Value::Object(map)) => {
-            if let Some(map_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
-            {
-                for (key, val) in map {
-                    map_builder.keys().append_value(key);
-                    match val {
-                        Value::String(s) => map_builder.values().append_value(s),
-                        other => map_builder
-                            .values()
-                            .append_value(&serde_json::to_string(other).unwrap_or_default()),
-                    }
-                }
-                map_builder
-                    .append(true)
-                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
-            }
-        }
-        Some(Value::Array(arr)) => {
-            if let Some(map_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
-            {
-                for item in arr {
-                    if let Value::Object(kv_pair) = item {
-                        if kv_pair.len() == 2 {
-                            let mut iter = kv_pair.iter();
-                            if let (Some((_, key_val)), Some((_, value_val))) =
-                                (iter.next(), iter.next())
-                            {
-                                match key_val {
-                                    Value::String(k) => map_builder.keys().append_value(k),
-                                    other => map_builder.keys().append_value(
-                                        &serde_json::to_string(other).unwrap_or_default(),
-                                    ),
-                                }
-                                match value_val {
-                                    Value::String(v) => map_builder.values().append_value(v),
-                                    other => map_builder.values().append_value(
-                                        &serde_json::to_string(other).unwrap_or_default(),
-                                    ),
-                                }
-                            }
-                        }
-                    }
-                }
-                map_builder
-                    .append(true)
-                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
-            }
-        }
-        Some(_) => {
-            if let Some(map_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
-            {
-                map_builder
-                    .append(false)
-                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
-            }
-        }
-        None => {
-            if let Some(map_builder) = builder
-                .as_any_mut()
-                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
-            {
-                map_builder
-                    .append(false)
-                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
-            }
-        }
     }
     Ok(())
 }
@@ -1265,17 +1320,17 @@ fn append_to_struct_field_builder(
         }
         DataType::Decimal128(_, _) => {
             let field_builder = builder
-                .field_builder::<Decimal128Builder>(field_index)
+                .field_builder::<Decimal128BuilderWrapper>(field_index)
                 .ok_or_else(|| Error::BuilderDowncastError {
-                    expected: "Decimal128Builder".to_string(),
+                    expected: "Decimal128BuilderWrapper".to_string(),
                 })?;
             append_decimal128_value(field_builder, value)?;
         }
         DataType::Decimal256(_, _) => {
             let field_builder = builder
-                .field_builder::<Decimal256Builder>(field_index)
+                .field_builder::<Decimal256BuilderWrapper>(field_index)
                 .ok_or_else(|| Error::BuilderDowncastError {
-                    expected: "Decimal256Builder".to_string(),
+                    expected: "Decimal256BuilderWrapper".to_string(),
                 })?;
             append_decimal256_value(field_builder, value)?;
         }
@@ -1378,6 +1433,8 @@ fn append_struct_value(
     Ok(())
 }
 
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1392,6 +1449,219 @@ mod tests {
                 type_name: type_name.to_string(),
             })
             .collect()
+    }
+
+    fn assert_boolean_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<bool>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_int8_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i8>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Int8Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_int16_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i16>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_int32_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i32>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_int64_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i64>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_float32_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<f32>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert!((array.value(i) - expected_value).abs() < f32::EPSILON,
+                    "Mismatch at index {}: expected {}, got {}", i, expected_value, array.value(i));
+        }
+    }
+
+    fn assert_float64_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<f64>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert!((array.value(i) - expected_value).abs() < f64::EPSILON,
+                    "Mismatch at index {}: expected {}, got {}", i, expected_value, array.value(i));
+        }
+    }
+
+    fn assert_string_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<&str>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_int32_array_with_nulls(record_batch: &RecordBatch, column_index: usize, expected: Vec<Option<i32>>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            match expected_value {
+                Some(val) => {
+                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
+                    assert_eq!(array.value(i), *val, "Mismatch at index {}", i);
+                }
+                None => {
+                    assert!(array.is_null(i), "Expected null at index {}", i);
+                }
+            }
+        }
+    }
+
+    fn assert_string_array_with_nulls(record_batch: &RecordBatch, column_index: usize, expected: Vec<Option<&str>>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            match expected_value {
+                Some(val) => {
+                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
+                    assert_eq!(array.value(i), *val, "Mismatch at index {}", i);
+                }
+                None => {
+                    assert!(array.is_null(i), "Expected null at index {}", i);
+                }
+            }
+        }
+    }
+
+    fn assert_date32_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i32>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Date32Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_time64_nanosecond_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i64>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Time64NanosecondArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_timestamp_microsecond_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i64>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_decimal128_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i128>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_decimal256_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<arrow::datatypes::i256>) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Decimal256Array>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
     }
 
     #[test]
@@ -1451,7 +1721,7 @@ mod tests {
                 json!(false),
                 json!(-128),
                 json!(-32768),
-                json!(-2147483648i64),
+                json!(-2147483648),
                 json!(-9223372036854775808i64),
                 json!(-1.23f32),
                 json!(-9.876543210),
@@ -1463,23 +1733,15 @@ mod tests {
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 8);
 
-        // Verify boolean column
-        let bool_array = result
-            .column(0)
-            .as_any()
-            .downcast_ref::<BooleanArray>()
-            .unwrap();
-        assert_eq!(bool_array.value(0), true);
-        assert_eq!(bool_array.value(1), false);
+        assert_boolean_array(&result, 0, vec![true, false]);
+        assert_int8_array(&result, 1, vec![127, -128]);
+        assert_int16_array(&result, 2, vec![32767, -32768]);
+        assert_int32_array(&result, 3, vec![2147483647, -2147483648]);
+        assert_int64_array(&result, 4, vec![9223372036854775807i64, -9223372036854775808i64]);
+        assert_float32_array(&result, 5, vec![3.14f32, -1.23f32]);
+        assert_float64_array(&result, 6, vec![2.718281828, -9.876543210]);
+        assert_string_array(&result, 7, vec!["hello", "world"]);
 
-        // Verify string column
-        let string_array = result
-            .column(7)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        assert_eq!(string_array.value(0), "hello");
-        assert_eq!(string_array.value(1), "world");
     }
 
     #[test]
@@ -1487,39 +1749,19 @@ mod tests {
         let columns = create_test_columns(vec![
             ("nullable_int", "integer"),
             ("nullable_string", "varchar"),
-            ("nullable_bool", "boolean"),
         ]);
 
         let rows = vec![
-            vec![json!(42), json!("test"), json!(true)],
-            vec![Value::Null, Value::Null, Value::Null],
-            vec![json!(100), json!("another"), json!(false)],
+            vec![json!(42), json!("test")],
+            vec![Value::Null, Value::Null],
+            vec![json!(100), json!("another")],
         ];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
         assert_eq!(result.num_rows(), 3);
 
-        // Check int column nulls
-        let int_array = result
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap();
-        assert!(!int_array.is_null(0));
-        assert!(int_array.is_null(1));
-        assert!(!int_array.is_null(2));
-        assert_eq!(int_array.value(0), 42);
-        assert_eq!(int_array.value(2), 100);
-
-        // Check string column nulls
-        let string_array = result
-            .column(1)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-        assert!(!string_array.is_null(0));
-        assert!(string_array.is_null(1));
-        assert!(!string_array.is_null(2));
+        assert_int32_array_with_nulls(&result, 0, vec![Some(42), None, Some(100)]);
+        assert_string_array_with_nulls(&result, 1, vec![Some("test"), None, Some("another")]);
     }
 
     #[test]
@@ -1530,35 +1772,42 @@ mod tests {
             ("timestamp_col", "timestamp"),
         ]);
 
-        let rows = vec![vec![
-            json!("2023-12-25"),
-            json!("14:30:45.123456789"),
-            json!("2023-12-25T14:30:45.123456Z"),
-        ]];
+        let rows = vec![
+            vec![
+                json!("2023-12-25"),
+                json!("14:30:45.123456789"),
+                json!("2023-12-25T14:30:45.123456Z"),
+            ],
+            vec![
+                json!("1970-01-01"),
+                json!("00:00:00.000000000"),
+                json!("1970-01-01T00:00:00.000000Z"),
+            ],
+        ];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
-        assert_eq!(result.num_rows(), 1);
+        assert_eq!(result.num_rows(), 2);
+        assert_eq!(result.num_columns(), 3);
 
-        let date_array = result
-            .column(0)
-            .as_any()
-            .downcast_ref::<Date32Array>()
-            .unwrap();
-        assert!(!date_array.is_null(0));
+        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let date1 = NaiveDate::from_ymd_opt(2023, 12, 25).unwrap().signed_duration_since(epoch).num_days() as i32;
+        let date2 = 0; // 1970-01-01 is day 0
 
-        let time_array = result
-            .column(1)
-            .as_any()
-            .downcast_ref::<Time64NanosecondArray>()
-            .unwrap();
-        assert!(!time_array.is_null(0));
+        fn time_to_nanos(time_str: &str) -> i64 {
+            let time = chrono::NaiveTime::parse_from_str(time_str, "%H:%M:%S%.f").unwrap();
+            time.num_seconds_from_midnight() as i64 * 1_000_000_000 + time.nanosecond() as i64
+        }
 
-        let timestamp_array = result
-            .column(2)
-            .as_any()
-            .downcast_ref::<TimestampMicrosecondArray>()
-            .unwrap();
-        assert!(!timestamp_array.is_null(0));
+        let time1 = time_to_nanos("14:30:45.123456789");
+        let time2 = time_to_nanos("00:00:00.000000000");
+
+        // Timestamp: microseconds since Unix epoch
+        let timestamp1 = chrono::DateTime::parse_from_rfc3339("2023-12-25T14:30:45.123456Z").unwrap().timestamp_micros();
+        let timestamp2 = 0; // 1970-01-01T00:00:00.000000Z
+
+        assert_date32_array(&result, 0, vec![date1, date2]);
+        assert_time64_nanosecond_array(&result, 1, vec![time1, time2]);
+        assert_timestamp_microsecond_array(&result, 2, vec![timestamp1, timestamp2]);
     }
 
     #[test]
@@ -1586,24 +1835,62 @@ mod tests {
             ("decimal256_col", "decimal(42,4)"),
         ]);
 
-        let rows = vec![vec![json!("123.45"), json!("999999999999.9999")]];
+        let rows = vec![
+            vec![
+                json!("123.45"),
+                json!("999999999999.9999")
+            ],
+            vec![
+                json!("0.00"),
+                json!("0.0000")
+            ],
+        ];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
-        assert_eq!(result.num_rows(), 1);
+        assert_eq!(result.num_rows(), 2);
+        assert_eq!(result.num_columns(), 2);
 
-        let decimal128_array = result
-            .column(0)
-            .as_any()
-            .downcast_ref::<Decimal128Array>()
-            .unwrap();
-        assert!(!decimal128_array.is_null(0));
+        // Helper function to convert decimal string to scaled integer
+        fn decimal_to_scaled_int128(decimal_str: &str, scale: u8) -> i128 {
+            let decimal = decimal_str.parse::<bigdecimal::BigDecimal>().unwrap();
+            let scale_factor = 10_i128.pow(scale as u32);
+            (decimal * bigdecimal::BigDecimal::from(scale_factor)).to_i128().unwrap()
+        }
 
-        let decimal256_array = result
-            .column(1)
-            .as_any()
-            .downcast_ref::<Decimal256Array>()
-            .unwrap();
-        assert!(!decimal256_array.is_null(0));
+        fn decimal_to_scaled_int256(decimal_str: &str, scale: u8) -> arrow::datatypes::i256 {
+            let decimal = decimal_str.parse::<bigdecimal::BigDecimal>().unwrap();
+            let scale_factor = bigdecimal::BigDecimal::from(10_i128.pow(scale as u32));
+            let scaled_decimal = decimal * scale_factor;
+
+            // Convert BigDecimal to i256 (this is what your to_decimal_256 function does)
+            let (bigint_value, _) = scaled_decimal.as_bigint_and_exponent();
+            let mut bigint_bytes = bigint_value.to_signed_bytes_le();
+
+            let is_negative = bigint_value.sign() == num_bigint::Sign::Minus;
+            let fill_byte = if is_negative { 0xFF } else { 0x00 };
+
+            if bigint_bytes.len() > 32 {
+                bigint_bytes.truncate(32);
+            } else {
+                bigint_bytes.resize(32, fill_byte);
+            };
+
+            let mut array = [0u8; 32];
+            array.copy_from_slice(&bigint_bytes);
+            arrow::datatypes::i256::from_le_bytes(array)
+        }
+
+        // Calculate expected values
+        // decimal(10,2) means scale=2, so 123.45 becomes 12345
+        let decimal128_1 = decimal_to_scaled_int128("123.45", 2);
+        let decimal128_2 = decimal_to_scaled_int128("0.00", 2);
+
+        // decimal(42,4) means scale=4, so 999999999999.9999 becomes 9999999999999999
+        let decimal256_1 = decimal_to_scaled_int256("999999999999.9999", 4);
+        let decimal256_2 = decimal_to_scaled_int256("0.0000", 4);
+
+        assert_decimal128_array(&result, 0, vec![decimal128_1, decimal128_2]);
+        assert_decimal256_array(&result, 1, vec![decimal256_1, decimal256_2]);
     }
 
     #[test]
