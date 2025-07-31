@@ -1,14 +1,14 @@
-
 use super::{Error, FailedToBuildRecordBatchSnafu, Result};
 use crate::sql::arrow_sql_gen::trino::schema::trino_data_type_to_arrow_type;
 use arrow::{
     array::{
         ArrayBuilder, ArrayRef, BinaryBuilder, BooleanBuilder, Date32Builder, Decimal128Builder,
         Decimal256Builder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
-        Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder, NullBuilder, RecordBatch,
-        StringBuilder, Time64NanosecondBuilder, TimestampMicrosecondBuilder, MapBuilder, StructBuilder,
+        Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder, MapBuilder, NullBuilder,
+        RecordBatch, StringBuilder, StructBuilder, Time64NanosecondBuilder,
+        TimestampMicrosecondBuilder,
     },
-    datatypes::{i256, DataType, Date32Type, Field, Schema, TimeUnit, Fields},
+    datatypes::{i256, DataType, Date32Type, Field, Fields, Schema, TimeUnit},
 };
 use bigdecimal::BigDecimal;
 use bigdecimal::ToPrimitive;
@@ -87,7 +87,8 @@ fn create_empty_array(data_type: &DataType) -> ArrayRef {
             Arc::new(ListBuilder::new(values_builder).finish())
         }
         DataType::Struct(fields) => {
-            let arrays: Vec<ArrayRef> = fields.iter()
+            let arrays: Vec<ArrayRef> = fields
+                .iter()
                 .map(|field| create_empty_array(field.data_type()))
                 .collect();
             Arc::new(arrow::array::StructArray::try_new(fields.clone(), arrays, None).unwrap())
@@ -139,8 +140,12 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         DataType::LargeUtf8 => Ok(Box::new(LargeStringBuilder::with_capacity(capacity, 1024))),
         DataType::Binary => Ok(Box::new(BinaryBuilder::with_capacity(capacity, 1024))),
         DataType::Date32 => Ok(Box::new(Date32Builder::with_capacity(capacity))),
-        DataType::Time64(TimeUnit::Nanosecond) => Ok(Box::new(Time64NanosecondBuilder::with_capacity(capacity))),
-        DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(Box::new(TimestampMicrosecondBuilder::with_capacity(capacity))),
+        DataType::Time64(TimeUnit::Nanosecond) => {
+            Ok(Box::new(Time64NanosecondBuilder::with_capacity(capacity)))
+        }
+        DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(Box::new(
+            TimestampMicrosecondBuilder::with_capacity(capacity),
+        )),
         DataType::Decimal128(precision, scale) => {
             let builder = Decimal128Builder::with_capacity(capacity)
                 .with_precision_and_scale(*precision, *scale)
@@ -168,7 +173,8 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             if let DataType::Struct(struct_fields) = field.data_type() {
                 if struct_fields.len() == 2 {
                     let key_builder = create_arrow_builder_for_field(&struct_fields[0], capacity)?;
-                    let value_builder = create_arrow_builder_for_field(&struct_fields[1], capacity)?;
+                    let value_builder =
+                        create_arrow_builder_for_field(&struct_fields[1], capacity)?;
                     Ok(Box::new(MapBuilder::new(None, key_builder, value_builder)))
                 } else {
                     // Fallback to string for invalid map structure
@@ -186,7 +192,6 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         }
     }
 }
-
 
 fn append_row_to_builders(
     row: &Vec<Value>,
@@ -211,8 +216,12 @@ fn append_value_to_builder(
 ) -> Result<()> {
     match data_type {
         DataType::Boolean => {
-            let bool_builder = builder.as_any_mut().downcast_mut::<BooleanBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "BooleanBuilder".to_string() })?;
+            let bool_builder = builder
+                .as_any_mut()
+                .downcast_mut::<BooleanBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "BooleanBuilder".to_string(),
+                })?;
             match value {
                 Some(v) if v.is_null() => bool_builder.append_null(),
                 Some(Value::Bool(b)) => bool_builder.append_value(*b),
@@ -221,95 +230,163 @@ fn append_value_to_builder(
             }
         }
         DataType::Int8 => {
-            let int_builder = builder.as_any_mut().downcast_mut::<Int8Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int8Builder".to_string() })?;
+            let int_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Int8Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int8Builder".to_string(),
+                })?;
             append_int8_value(int_builder, value);
         }
         DataType::Int16 => {
-            let int_builder = builder.as_any_mut().downcast_mut::<Int16Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int16Builder".to_string() })?;
+            let int_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Int16Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int16Builder".to_string(),
+                })?;
             append_int16_value(int_builder, value);
         }
         DataType::Int32 => {
-            let int_builder = builder.as_any_mut().downcast_mut::<Int32Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int32Builder".to_string() })?;
+            let int_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Int32Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int32Builder".to_string(),
+                })?;
             append_int32_value(int_builder, value);
         }
         DataType::Int64 => {
-            let int_builder = builder.as_any_mut().downcast_mut::<Int64Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int64Builder".to_string() })?;
+            let int_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Int64Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int64Builder".to_string(),
+                })?;
             append_int64_value(int_builder, value);
         }
         DataType::Float32 => {
-            let float_builder = builder.as_any_mut().downcast_mut::<Float32Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Float32Builder".to_string() })?;
+            let float_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Float32Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Float32Builder".to_string(),
+                })?;
             append_float32_value(float_builder, value);
         }
         DataType::Float64 => {
-            let float_builder = builder.as_any_mut().downcast_mut::<Float64Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Float64Builder".to_string() })?;
+            let float_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Float64Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Float64Builder".to_string(),
+                })?;
             append_float64_value(float_builder, value);
         }
         DataType::Utf8 => {
-            let string_builder = builder.as_any_mut().downcast_mut::<StringBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "StringBuilder".to_string() })?;
+            let string_builder = builder
+                .as_any_mut()
+                .downcast_mut::<StringBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "StringBuilder".to_string(),
+                })?;
             append_string_value(string_builder, value);
         }
         DataType::LargeUtf8 => {
-            let large_string_builder = builder.as_any_mut().downcast_mut::<LargeStringBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "LargeStringBuilder".to_string() })?;
+            let large_string_builder = builder
+                .as_any_mut()
+                .downcast_mut::<LargeStringBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "LargeStringBuilder".to_string(),
+                })?;
             append_large_string_value(large_string_builder, value);
         }
         DataType::Binary => {
-            let binary_builder = builder.as_any_mut().downcast_mut::<BinaryBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "BinaryBuilder".to_string() })?;
+            let binary_builder = builder
+                .as_any_mut()
+                .downcast_mut::<BinaryBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "BinaryBuilder".to_string(),
+                })?;
             append_binary_value(binary_builder, value)?;
         }
         DataType::Date32 => {
-            let date_builder = builder.as_any_mut().downcast_mut::<Date32Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Date32Builder".to_string() })?;
+            let date_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Date32Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Date32Builder".to_string(),
+                })?;
             append_date32_value(date_builder, value)?;
         }
         DataType::Time64(TimeUnit::Nanosecond) => {
-            let time_builder = builder.as_any_mut().downcast_mut::<Time64NanosecondBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Time64NanosecondBuilder".to_string() })?;
+            let time_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Time64NanosecondBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Time64NanosecondBuilder".to_string(),
+                })?;
             append_time64_value(time_builder, value)?;
         }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
-            let timestamp_builder = builder.as_any_mut().downcast_mut::<TimestampMicrosecondBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "TimestampMicrosecondBuilder".to_string() })?;
+            let timestamp_builder = builder
+                .as_any_mut()
+                .downcast_mut::<TimestampMicrosecondBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "TimestampMicrosecondBuilder".to_string(),
+                })?;
             append_timestamp_value(timestamp_builder, value)?;
         }
         DataType::Decimal128(_, _) => {
-            let decimal_builder = builder.as_any_mut().downcast_mut::<Decimal128Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Decimal128Builder".to_string() })?;
+            let decimal_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Decimal128Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Decimal128Builder".to_string(),
+                })?;
             append_decimal128_value(decimal_builder, value)?;
         }
         DataType::Decimal256(_, _) => {
-            let decimal_builder = builder.as_any_mut().downcast_mut::<Decimal256Builder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Decimal256Builder".to_string() })?;
+            let decimal_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Decimal256Builder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Decimal256Builder".to_string(),
+                })?;
             append_decimal256_value(decimal_builder, value)?;
         }
         DataType::List(_) => {
             append_list_value(builder, value)?;
         }
         DataType::Struct(fields) => {
-            let struct_builder = builder.as_any_mut().downcast_mut::<StructBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "StructBuilder".to_string() })?;
+            let struct_builder = builder
+                .as_any_mut()
+                .downcast_mut::<StructBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "StructBuilder".to_string(),
+                })?;
             append_struct_value(struct_builder, value, fields)?;
         }
         DataType::Map(_, _) => {
             append_map_value(builder, value)?;
         }
         DataType::Null => {
-            let null_builder = builder.as_any_mut().downcast_mut::<NullBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "NullBuilder".to_string() })?;
+            let null_builder = builder
+                .as_any_mut()
+                .downcast_mut::<NullBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "NullBuilder".to_string(),
+                })?;
             null_builder.append_null();
         }
         _ => {
             // Fallback to string for unsupported types
-            let string_builder = builder.as_any_mut().downcast_mut::<StringBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "StringBuilder (fallback)".to_string() })?;
+            let string_builder = builder
+                .as_any_mut()
+                .downcast_mut::<StringBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "StringBuilder (fallback)".to_string(),
+                })?;
             append_string_value(string_builder, value);
         }
     }
@@ -497,7 +574,10 @@ fn append_time64_value(builder: &mut Time64NanosecondBuilder, value: Option<&Val
     Ok(())
 }
 
-fn append_timestamp_value(builder: &mut TimestampMicrosecondBuilder, value: Option<&Value>) -> Result<()> {
+fn append_timestamp_value(
+    builder: &mut TimestampMicrosecondBuilder,
+    value: Option<&Value>,
+) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(timestamp_str)) => {
@@ -565,12 +645,18 @@ fn append_list_value(builder: &mut dyn ArrayBuilder, value: Option<&Value>) -> R
         Some(v) if v.is_null() => {
             // We need to figure out what type of list builder this is
             // For now, let's assume it's a string list (most common case)
-            if let Some(list_builder) = builder.as_any_mut().downcast_mut::<ListBuilder<StringBuilder>>() {
+            if let Some(list_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<ListBuilder<StringBuilder>>()
+            {
                 list_builder.append_null();
             }
         }
         Some(Value::Array(arr)) => {
-            if let Some(list_builder) = builder.as_any_mut().downcast_mut::<ListBuilder<StringBuilder>>() {
+            if let Some(list_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<ListBuilder<StringBuilder>>()
+            {
                 for item in arr {
                     match item {
                         Value::String(s) => list_builder.values().append_value(s),
@@ -583,12 +669,18 @@ fn append_list_value(builder: &mut dyn ArrayBuilder, value: Option<&Value>) -> R
             }
         }
         Some(_) => {
-            if let Some(list_builder) = builder.as_any_mut().downcast_mut::<ListBuilder<StringBuilder>>() {
+            if let Some(list_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<ListBuilder<StringBuilder>>()
+            {
                 list_builder.append_null();
             }
         }
         None => {
-            if let Some(list_builder) = builder.as_any_mut().downcast_mut::<ListBuilder<StringBuilder>>() {
+            if let Some(list_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<ListBuilder<StringBuilder>>()
+            {
                 list_builder.append_null();
             }
         }
@@ -602,52 +694,85 @@ fn append_map_value(builder: &mut dyn ArrayBuilder, value: Option<&Value>) -> Re
     match value {
         Some(v) if v.is_null() => {
             // Try to downcast to common map types
-            if let Some(map_builder) = builder.as_any_mut().downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>() {
-                map_builder.append(false).map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            if let Some(map_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
+            {
+                map_builder
+                    .append(false)
+                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             }
         }
         Some(Value::Object(map)) => {
-            if let Some(map_builder) = builder.as_any_mut().downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>() {
+            if let Some(map_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
+            {
                 for (key, val) in map {
                     map_builder.keys().append_value(key);
                     match val {
                         Value::String(s) => map_builder.values().append_value(s),
-                        other => map_builder.values().append_value(&serde_json::to_string(other).unwrap_or_default()),
+                        other => map_builder
+                            .values()
+                            .append_value(&serde_json::to_string(other).unwrap_or_default()),
                     }
                 }
-                map_builder.append(true).map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+                map_builder
+                    .append(true)
+                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             }
         }
         Some(Value::Array(arr)) => {
-            if let Some(map_builder) = builder.as_any_mut().downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>() {
+            if let Some(map_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
+            {
                 for item in arr {
                     if let Value::Object(kv_pair) = item {
                         if kv_pair.len() == 2 {
                             let mut iter = kv_pair.iter();
-                            if let (Some((_, key_val)), Some((_, value_val))) = (iter.next(), iter.next()) {
+                            if let (Some((_, key_val)), Some((_, value_val))) =
+                                (iter.next(), iter.next())
+                            {
                                 match key_val {
                                     Value::String(k) => map_builder.keys().append_value(k),
-                                    other => map_builder.keys().append_value(&serde_json::to_string(other).unwrap_or_default()),
+                                    other => map_builder.keys().append_value(
+                                        &serde_json::to_string(other).unwrap_or_default(),
+                                    ),
                                 }
                                 match value_val {
                                     Value::String(v) => map_builder.values().append_value(v),
-                                    other => map_builder.values().append_value(&serde_json::to_string(other).unwrap_or_default()),
+                                    other => map_builder.values().append_value(
+                                        &serde_json::to_string(other).unwrap_or_default(),
+                                    ),
                                 }
                             }
                         }
                     }
                 }
-                map_builder.append(true).map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+                map_builder
+                    .append(true)
+                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             }
         }
         Some(_) => {
-            if let Some(map_builder) = builder.as_any_mut().downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>() {
-                map_builder.append(false).map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            if let Some(map_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
+            {
+                map_builder
+                    .append(false)
+                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             }
         }
         None => {
-            if let Some(map_builder) = builder.as_any_mut().downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>() {
-                map_builder.append(false).map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            if let Some(map_builder) = builder
+                .as_any_mut()
+                .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
+            {
+                map_builder
+                    .append(false)
+                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             }
         }
     }
@@ -672,19 +797,31 @@ fn append_null_to_any_builder(builder: &mut dyn ArrayBuilder) {
         f64_builder.append_null();
     } else if let Some(string_builder) = builder.as_any_mut().downcast_mut::<StringBuilder>() {
         string_builder.append_null();
-    } else if let Some(large_string_builder) = builder.as_any_mut().downcast_mut::<LargeStringBuilder>() {
+    } else if let Some(large_string_builder) =
+        builder.as_any_mut().downcast_mut::<LargeStringBuilder>()
+    {
         large_string_builder.append_null();
     } else if let Some(binary_builder) = builder.as_any_mut().downcast_mut::<BinaryBuilder>() {
         binary_builder.append_null();
     } else if let Some(date_builder) = builder.as_any_mut().downcast_mut::<Date32Builder>() {
         date_builder.append_null();
-    } else if let Some(time_builder) = builder.as_any_mut().downcast_mut::<Time64NanosecondBuilder>() {
+    } else if let Some(time_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<Time64NanosecondBuilder>()
+    {
         time_builder.append_null();
-    } else if let Some(timestamp_builder) = builder.as_any_mut().downcast_mut::<TimestampMicrosecondBuilder>() {
+    } else if let Some(timestamp_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<TimestampMicrosecondBuilder>()
+    {
         timestamp_builder.append_null();
-    } else if let Some(decimal128_builder) = builder.as_any_mut().downcast_mut::<Decimal128Builder>() {
+    } else if let Some(decimal128_builder) =
+        builder.as_any_mut().downcast_mut::<Decimal128Builder>()
+    {
         decimal128_builder.append_null();
-    } else if let Some(decimal256_builder) = builder.as_any_mut().downcast_mut::<Decimal256Builder>() {
+    } else if let Some(decimal256_builder) =
+        builder.as_any_mut().downcast_mut::<Decimal256Builder>()
+    {
         decimal256_builder.append_null();
     } else if let Some(null_builder) = builder.as_any_mut().downcast_mut::<NullBuilder>() {
         null_builder.append_null();
@@ -783,8 +920,11 @@ fn append_to_struct_field_builder(
 ) -> Result<()> {
     match field_data_type {
         DataType::Boolean => {
-            let field_builder = builder.field_builder::<BooleanBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "BooleanBuilder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<BooleanBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "BooleanBuilder".to_string(),
+                })?;
             match value {
                 Some(v) if v.is_null() => field_builder.append_null(),
                 Some(Value::Bool(b)) => field_builder.append_value(*b),
@@ -792,84 +932,132 @@ fn append_to_struct_field_builder(
             }
         }
         DataType::Int8 => {
-            let field_builder = builder.field_builder::<Int8Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int8Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Int8Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int8Builder".to_string(),
+                })?;
             append_int8_value(field_builder, value);
         }
         DataType::Int16 => {
-            let field_builder = builder.field_builder::<Int16Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int16Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Int16Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int16Builder".to_string(),
+                })?;
             append_int16_value(field_builder, value);
         }
         DataType::Int32 => {
-            let field_builder = builder.field_builder::<Int32Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int32Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Int32Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int32Builder".to_string(),
+                })?;
             append_int32_value(field_builder, value);
         }
         DataType::Int64 => {
-            let field_builder = builder.field_builder::<Int64Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Int64Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Int64Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Int64Builder".to_string(),
+                })?;
             append_int64_value(field_builder, value);
         }
         DataType::Float32 => {
-            let field_builder = builder.field_builder::<Float32Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Float32Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Float32Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Float32Builder".to_string(),
+                })?;
             append_float32_value(field_builder, value);
         }
         DataType::Float64 => {
-            let field_builder = builder.field_builder::<Float64Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Float64Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Float64Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Float64Builder".to_string(),
+                })?;
             append_float64_value(field_builder, value);
         }
         DataType::Utf8 => {
-            let field_builder = builder.field_builder::<StringBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "StringBuilder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<StringBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "StringBuilder".to_string(),
+                })?;
             append_string_value(field_builder, value);
         }
         DataType::LargeUtf8 => {
-            let field_builder = builder.field_builder::<LargeStringBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "LargeStringBuilder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<LargeStringBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "LargeStringBuilder".to_string(),
+                })?;
             append_large_string_value(field_builder, value);
         }
         DataType::Binary => {
-            let field_builder = builder.field_builder::<BinaryBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "BinaryBuilder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<BinaryBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "BinaryBuilder".to_string(),
+                })?;
             append_binary_value(field_builder, value)?;
         }
         DataType::Date32 => {
-            let field_builder = builder.field_builder::<Date32Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Date32Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Date32Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Date32Builder".to_string(),
+                })?;
             append_date32_value(field_builder, value)?;
         }
         DataType::Time64(TimeUnit::Nanosecond) => {
-            let field_builder = builder.field_builder::<Time64NanosecondBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Time64NanosecondBuilder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Time64NanosecondBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Time64NanosecondBuilder".to_string(),
+                })?;
             append_time64_value(field_builder, value)?;
         }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
-            let field_builder = builder.field_builder::<TimestampMicrosecondBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "TimestampMicrosecondBuilder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<TimestampMicrosecondBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "TimestampMicrosecondBuilder".to_string(),
+                })?;
             append_timestamp_value(field_builder, value)?;
         }
         DataType::Decimal128(_, _) => {
-            let field_builder = builder.field_builder::<Decimal128Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Decimal128Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Decimal128Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Decimal128Builder".to_string(),
+                })?;
             append_decimal128_value(field_builder, value)?;
         }
         DataType::Decimal256(_, _) => {
-            let field_builder = builder.field_builder::<Decimal256Builder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "Decimal256Builder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<Decimal256Builder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Decimal256Builder".to_string(),
+                })?;
             append_decimal256_value(field_builder, value)?;
         }
         DataType::Null => {
-            let field_builder = builder.field_builder::<NullBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "NullBuilder".to_string() })?;
+            let field_builder = builder
+                .field_builder::<NullBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "NullBuilder".to_string(),
+                })?;
             field_builder.append_null();
         }
         _ => {
             // For unsupported types, fall back to string
-            let field_builder = builder.field_builder::<StringBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError { expected: "StringBuilder (fallback)".to_string() })?;
+            let field_builder = builder
+                .field_builder::<StringBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "StringBuilder (fallback)".to_string(),
+                })?;
             append_string_value(field_builder, value);
         }
     }
