@@ -1956,7 +1956,7 @@ mod tests {
         assert_eq!(result.num_columns(), 1);
     }
 
-    #[test]
+    // #[test]
     // fn test_complex_nested_map() {
     //     let columns = create_test_columns(vec![(
     //         "nested_map",

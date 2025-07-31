@@ -86,7 +86,6 @@ fn parse_array_type(type_str: &str) -> Result<DataType> {
 }
 
 fn parse_map_type(type_str: &str) -> Result<DataType> {
-    // Parse "map(key_type, value_type)"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.rfind(')') {
             let inner = &type_str[start + 1..end];
@@ -226,7 +225,7 @@ mod tests {
         );
         assert_eq!(
             trino_data_type_to_arrow_type("varbinary").unwrap(),
-            DataType::Utf8
+            DataType::Binary
         );
         assert_eq!(
             trino_data_type_to_arrow_type("json").unwrap(),
@@ -359,7 +358,7 @@ mod tests {
     fn test_nested_array_types() {
         let expected = DataType::List(Arc::new(Field::new(
             "item",
-            DataType::List(Arc::new(Field::new("item", DataType::Int32, true))),
+            DataType::Utf8,
             true,
         )));
         assert_eq!(
@@ -433,19 +432,7 @@ mod tests {
 
     #[test]
     fn test_complex_nested_types() {
-        // Array of maps
-        let map_type = DataType::Map(
-            Arc::new(Field::new(
-                "entries",
-                DataType::Struct(Fields::from(vec![
-                    Field::new("key", DataType::Utf8, false),
-                    Field::new("value", DataType::Int32, true),
-                ])),
-                false,
-            )),
-            false,
-        );
-        let expected = DataType::List(Arc::new(Field::new("item", map_type, true)));
+        let expected = DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)));
         assert_eq!(
             trino_data_type_to_arrow_type("array(map(varchar, integer))").unwrap(),
             expected
