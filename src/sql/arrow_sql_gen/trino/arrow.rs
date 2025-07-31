@@ -81,8 +81,7 @@ fn create_empty_array(data_type: &DataType) -> ArrayRef {
         }
         DataType::Decimal128(_, _) => Arc::new(Decimal128Builder::new().finish()),
         DataType::Decimal256(_, _) => Arc::new(Decimal256Builder::new().finish()),
-        DataType::List(field) => {
-            let values_array = create_empty_array(field.data_type());
+        DataType::List(_) => {
             let values_builder: Box<dyn ArrayBuilder> = Box::new(StringBuilder::new());
             Arc::new(ListBuilder::new(values_builder).finish())
         }
