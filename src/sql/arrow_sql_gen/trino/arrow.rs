@@ -1,22 +1,20 @@
+use super::{Error, FailedToBuildRecordBatchSnafu, Result};
+use crate::sql::arrow_sql_gen::trino::schema::trino_data_type_to_arrow_type;
 use arrow::{
     array::{
         ArrayBuilder, ArrayRef, BinaryBuilder, BooleanBuilder, Date32Builder, Decimal128Builder,
         Decimal256Builder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
-        Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder,
-        NullBuilder, RecordBatch, StringBuilder, Time64NanosecondBuilder, TimestampMicrosecondBuilder,
+        Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder, NullBuilder, RecordBatch,
+        StringBuilder, Time64NanosecondBuilder, TimestampMicrosecondBuilder,
     },
-    datatypes::{
-        i256, DataType, Date32Type, Field, Schema, TimeUnit,
-    },
+    datatypes::{i256, DataType, Date32Type, Field, Schema, TimeUnit},
 };
 use bigdecimal::BigDecimal;
 use bigdecimal::ToPrimitive;
 use chrono::{NaiveDate, NaiveTime, Timelike};
 use serde_json::Value;
-use snafu::{ResultExt};
+use snafu::ResultExt;
 use std::{collections::HashMap, sync::Arc};
-use crate::sql::arrow_sql_gen::trino::schema::trino_data_type_to_arrow_type;
-use super::{Error, FailedToBuildRecordBatchSnafu, Result};
 
 #[derive(Debug, Clone)]
 pub struct TrinoColumn {
@@ -24,13 +22,8 @@ pub struct TrinoColumn {
     pub type_name: String,
 }
 
-
-pub fn rows_to_arrow(
-    rows: &[Vec<Value>],
-    columns: &Vec<TrinoColumn>,
-) -> Result<RecordBatch> {
+pub fn rows_to_arrow(rows: &[Vec<Value>], columns: &Vec<TrinoColumn>) -> Result<RecordBatch> {
     if rows.is_empty() {
-        // Return empty batch with correct schema if we have columns info
         if !columns.is_empty() {
             let schema = build_schema_from_columns(&columns)?;
             let empty_arrays: Vec<ArrayRef> = schema
@@ -82,7 +75,9 @@ fn create_empty_array(data_type: &DataType) -> ArrayRef {
         DataType::Binary => Arc::new(BinaryBuilder::new().finish()),
         DataType::Date32 => Arc::new(Date32Builder::new().finish()),
         DataType::Time64(TimeUnit::Nanosecond) => Arc::new(Time64NanosecondBuilder::new().finish()),
-        DataType::Timestamp(TimeUnit::Microsecond, _) => Arc::new(TimestampMicrosecondBuilder::new().finish()),
+        DataType::Timestamp(TimeUnit::Microsecond, _) => {
+            Arc::new(TimestampMicrosecondBuilder::new().finish())
+        }
         DataType::Decimal128(_, _) => Arc::new(Decimal128Builder::new().finish()),
         DataType::Decimal256(_, _) => Arc::new(Decimal256Builder::new().finish()),
         DataType::List(_) => {
@@ -120,14 +115,18 @@ fn create_builders(schema: &Schema, capacity: usize) -> Result<BuilderMap> {
             DataType::LargeUtf8 => Box::new(TrinoLargeStringArrayBuilder::new(capacity)),
             DataType::Binary => Box::new(TrinoBinaryArrayBuilder::new(capacity)),
             DataType::Date32 => Box::new(TrinoDate32ArrayBuilder::new(capacity)),
-            DataType::Time64(TimeUnit::Nanosecond) => Box::new(TrinoTime64ArrayBuilder::new(capacity)),
-            DataType::Timestamp(TimeUnit::Microsecond, _) => Box::new(TrinoTimestampArrayBuilder::new(capacity)),
-            DataType::Decimal128(precision, scale) => {
-                Box::new(TrinoDecimal128ArrayBuilder::new(capacity, *precision, *scale)?)
+            DataType::Time64(TimeUnit::Nanosecond) => {
+                Box::new(TrinoTime64ArrayBuilder::new(capacity))
             }
-            DataType::Decimal256(precision, scale) => {
-                Box::new(TrinoDecimal256ArrayBuilder::new(capacity, *precision, *scale)?)
+            DataType::Timestamp(TimeUnit::Microsecond, _) => {
+                Box::new(TrinoTimestampArrayBuilder::new(capacity))
             }
+            DataType::Decimal128(precision, scale) => Box::new(TrinoDecimal128ArrayBuilder::new(
+                capacity, *precision, *scale,
+            )?),
+            DataType::Decimal256(precision, scale) => Box::new(TrinoDecimal256ArrayBuilder::new(
+                capacity, *precision, *scale,
+            )?),
             DataType::List(_) => Box::new(TrinoListArrayBuilder::new(capacity)),
             DataType::Null => Box::new(TrinoNullArrayBuilder::new()),
             _ => {
@@ -556,7 +555,9 @@ impl TrinoArrayBuilderTrait for TrinoTimestampArrayBuilder {
                 // Try to parse ISO 8601 format first
                 if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(timestamp_str) {
                     self.0.append_value(dt.timestamp_micros());
-                } else if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f") {
+                } else if let Ok(dt) =
+                    chrono::NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
+                {
                     self.0.append_value(dt.and_utc().timestamp_micros());
                 } else {
                     return Err(Error::InvalidTimestampValue {
@@ -661,7 +662,10 @@ impl TrinoArrayBuilderTrait for TrinoListArrayBuilder {
                 for item in arr {
                     match item {
                         Value::String(s) => self.0.values().append_value(s),
-                        other => self.0.values().append_value(&serde_json::to_string(other).unwrap_or_default()),
+                        other => self
+                            .0
+                            .values()
+                            .append_value(&serde_json::to_string(other).unwrap_or_default()),
                     }
                 }
                 self.0.append(true);

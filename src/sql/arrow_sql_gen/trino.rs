@@ -1,6 +1,6 @@
-use std::convert;
 use bigdecimal::BigDecimal;
 use snafu::Snafu;
+use std::convert;
 
 pub mod arrow;
 pub mod schema;
@@ -10,7 +10,9 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Failed to build record batch: {source}"))]
-    FailedToBuildRecordBatch { source: datafusion::arrow::error::ArrowError },
+    FailedToBuildRecordBatch {
+        source: datafusion::arrow::error::ArrowError,
+    },
 
     #[snafu(display("No builder found for index {index}"))]
     NoBuilderForIndex { index: usize },

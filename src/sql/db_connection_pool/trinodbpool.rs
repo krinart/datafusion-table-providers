@@ -43,8 +43,8 @@ pub enum Error {
         port: u16,
     },
 
-    #[snafu(display("Authentication failed. Verify username and password."))]
-    InvalidUsernameOrPassword,
+    #[snafu(display("Authentication failed."))]
+    AuthenticationFailedError,
 
     #[snafu(display("Invalid Trino URL: {url}. Ensure it starts with http:// or https://"))]
     InvalidTrinoUrl { url: String },
@@ -56,10 +56,7 @@ pub enum Error {
     FailedToBuildHttpClient { source: reqwest::Error },
 
     #[snafu(display("Trino server error: {status_code} - {message}"))]
-    TrinoServerError {
-        status_code: u16,
-        message: String,
-    },
+    TrinoServerError { status_code: u16, message: String },
 }
 
 #[derive(Clone)]
@@ -242,12 +239,9 @@ impl TrinoConnectionPool {
     ///
     /// Returns an error if there is a problem creating the connection.
     pub async fn connect_direct(&self) -> super::Result<TrinoConnection> {
-        let mut connection = TrinoConnection::new_with_config(
-            self.client.clone(),
-            self.base_url.clone(),
-
-        )
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        let mut connection =
+            TrinoConnection::new_with_config(self.client.clone(), self.base_url.clone())
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
         connection = connection.with_unsupported_type_action(self.unsupported_type_action);
 
@@ -264,7 +258,7 @@ impl TrinoConnectionPool {
             .context(TrinoConnectionSnafu)?;
 
         if response.status() == 401 {
-            return Err(Error::InvalidUsernameOrPassword);
+            return Err(Error::AuthenticationFailedError);
         }
 
         if !response.status().is_success() {
@@ -318,9 +312,7 @@ impl TrinoConnectionPool {
 
 #[async_trait]
 impl DbConnectionPool<Arc<Client>, &'static str> for TrinoConnectionPool {
-    async fn connect(
-        &self,
-    ) -> super::Result<Box<dyn DbConnection<Arc<Client>, &'static str>>> {
+    async fn connect(&self) -> super::Result<Box<dyn DbConnection<Arc<Client>, &'static str>>> {
         let connection = self.connect_direct().await?;
         Ok(Box::new(connection))
     }

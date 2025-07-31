@@ -1,7 +1,15 @@
 use std::{any::Any, sync::Arc};
 
-use crate::sql::arrow_sql_gen::trino::{self, schema::trino_data_type_to_arrow_type, arrow::{rows_to_arrow, TrinoColumn}};
+use super::AsyncDbConnection;
+use super::DbConnection;
+use super::Result;
+use crate::sql::arrow_sql_gen::trino::{
+    self,
+    arrow::{rows_to_arrow, TrinoColumn},
+    schema::trino_data_type_to_arrow_type,
+};
 use crate::util::handle_unsupported_type_error;
+use crate::UnsupportedTypeAction;
 use arrow::datatypes::Field;
 use arrow::datatypes::Schema;
 use arrow::datatypes::SchemaRef;
@@ -14,19 +22,14 @@ use futures::stream;
 use futures::StreamExt;
 use serde_json::Value;
 use snafu::prelude::*;
-use tokio::time::sleep;
-use crate::UnsupportedTypeAction;
 use std::time::Duration;
-use super::AsyncDbConnection;
-use super::DbConnection;
-use super::Result;
+use tokio::time::sleep;
 
 #[derive(Debug, Clone)]
 pub struct TrinoQueryResult {
     pub data: Vec<Vec<Value>>,
     pub columns: Vec<TrinoColumn>,
 }
-
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -40,10 +43,7 @@ pub enum Error {
     AuthenticationFailedError,
 
     #[snafu(display("Trino server error: {status_code} - {message}"))]
-    TrinoServerError {
-        status_code: u16,
-        message: String,
-    },
+    TrinoServerError { status_code: u16, message: String },
 
     #[snafu(display("Failed to parse Trino response: {source}"))]
     ResponseParseError { source: serde_json::Error },
@@ -97,11 +97,12 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
     ) -> Result<SchemaRef, super::Error> {
         let sql = format!("DESCRIBE {}", table_reference.to_string());
 
-        let query_result = self.execute_query(&sql).await.map_err(|e| {
-            super::Error::UnableToGetSchema {
-                source: Box::new(e),
-            }
-        })?;
+        let query_result =
+            self.execute_query(&sql)
+                .await
+                .map_err(|e| super::Error::UnableToGetSchema {
+                    source: Box::new(e),
+                })?;
 
         let mut fields = Vec::new();
 
@@ -109,21 +110,23 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 
         for row_data in query_result.data {
             if row_data.len() >= 2 {
-                let column_name = row_data[0]
-                    .as_str()
-                    .ok_or_else(|| super::Error::UnableToGetSchema {
-                        source: Box::new(Error::MissingField {
-                            field: "column_name".to_string(),
-                        }),
-                    })?;
+                let column_name =
+                    row_data[0]
+                        .as_str()
+                        .ok_or_else(|| super::Error::UnableToGetSchema {
+                            source: Box::new(Error::MissingField {
+                                field: "column_name".to_string(),
+                            }),
+                        })?;
 
-                let data_type = row_data[1]
-                    .as_str()
-                    .ok_or_else(|| super::Error::UnableToGetSchema {
-                        source: Box::new(Error::MissingField {
-                            field: "data_type".to_string(),
-                        }),
-                    })?;
+                let data_type =
+                    row_data[1]
+                        .as_str()
+                        .ok_or_else(|| super::Error::UnableToGetSchema {
+                            source: Box::new(Error::MissingField {
+                                field: "data_type".to_string(),
+                            }),
+                        })?;
 
                 let nullable = if row_data.len() > 2 {
                     row_data[2].as_str().unwrap_or("true") != "false"
@@ -157,11 +160,12 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         _params: &[&'a str],
         _projected_schema: Option<SchemaRef>,
     ) -> Result<SendableRecordBatchStream> {
-        let query_result = self.execute_query(sql).await.map_err(|e| {
-            super::Error::UnableToQueryArrow {
-                source: Box::new(e),
-            }
-        })?;
+        let query_result =
+            self.execute_query(sql)
+                .await
+                .map_err(|e| super::Error::UnableToQueryArrow {
+                    source: Box::new(e),
+                })?;
 
         let data_rows = query_result.data;
         let columns = query_result.columns;
@@ -184,21 +188,19 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
             )));
         };
 
-        let first_chunk = first_chunk.map_err(|e| {
-            super::Error::UnableToQueryArrow {
-                source: Box::new(e),
-            }
+        let first_chunk = first_chunk.map_err(|e| super::Error::UnableToQueryArrow {
+            source: Box::new(e),
         })?;
         let schema = first_chunk.schema();
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, {
             stream! {
-            yield Ok(first_chunk);
-            while let Some(batch) = stream.next().await {
-                yield batch
-                    .map_err(|e| DataFusionError::Execution(format!("Failed to fetch batch: {e}")))
+                yield Ok(first_chunk);
+                while let Some(batch) = stream.next().await {
+                    yield batch
+                        .map_err(|e| DataFusionError::Execution(format!("Failed to fetch batch: {e}")))
+                }
             }
-        }
         })))
     }
 
@@ -208,10 +210,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 }
 
 impl TrinoConnection {
-    pub fn new_with_config(
-        client: Arc<reqwest::Client>,
-        base_url: String,
-    ) -> Result<Self, Error> {
+    pub fn new_with_config(client: Arc<reqwest::Client>, base_url: String) -> Result<Self, Error> {
         if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
             return Err(Error::InvalidUrl { url: base_url });
         }
@@ -235,7 +234,9 @@ impl TrinoConnection {
         let url = format!("{}/v1/statement", self.base_url);
 
         // Step 1: Submit the query
-        let response = self.client.clone()
+        let response = self
+            .client
+            .clone()
             .post(&url)
             .body(sql.to_string())
             .send()
@@ -251,7 +252,7 @@ impl TrinoConnection {
             } else {
                 Err(Error::TrinoServerError {
                     status_code,
-                    message
+                    message,
                 })
             };
         }
@@ -285,7 +286,11 @@ impl TrinoConnection {
             }
 
             let state = result["stats"]["state"].as_str().unwrap_or("");
-            println!("State: {}, next uri: {}", state, result.get("nextUri").and_then(|v| v.as_str()).unwrap_or(""));
+            println!(
+                "State: {}, next uri: {}",
+                state,
+                result.get("nextUri").and_then(|v| v.as_str()).unwrap_or("")
+            );
 
             // Extract data rows
             if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
@@ -303,12 +308,12 @@ impl TrinoConnection {
             } else if state == "FAILED" {
                 return Err(Error::TrinoServerError {
                     status_code: 500,
-                    message: "Query failed".to_string()
+                    message: "Query failed".to_string(),
                 });
             } else if state == "CANCELED" {
                 return Err(Error::TrinoServerError {
                     status_code: 499,
-                    message: "Query was canceled".to_string()
+                    message: "Query was canceled".to_string(),
                 });
             }
 
@@ -316,7 +321,9 @@ impl TrinoConnection {
                 // Wait before polling
                 sleep(Duration::from_millis(50)).await;
 
-                let response = self.client.clone()
+                let response = self
+                    .client
+                    .clone()
                     .get(next_uri)
                     .send()
                     .await
@@ -327,7 +334,7 @@ impl TrinoConnection {
                     let message = response.text().await.unwrap_or_default();
                     return Err(Error::TrinoServerError {
                         status_code,
-                        message
+                        message,
                     });
                 }
 
@@ -336,7 +343,7 @@ impl TrinoConnection {
                 if state != "FINISHED" {
                     return Err(Error::TrinoServerError {
                         status_code: 500,
-                        message: format!("Query stuck in state: {}", state)
+                        message: format!("Query stuck in state: {}", state),
                     });
                 }
                 break;

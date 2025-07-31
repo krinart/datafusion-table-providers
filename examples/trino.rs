@@ -59,7 +59,6 @@ async fn main() {
         ("url".to_string(), "http://localhost:8080".to_string()),
         ("catalog".to_string(), "tpch".to_string()),
         ("schema".to_string(), "tiny".to_string()),
-
         // Optional authentication
         ("user".to_string(), "test".to_string()),
         // ("password".to_string(), "secret".to_string()),
@@ -90,7 +89,7 @@ async fn main() {
             .await
             .expect("failed to register table provider"),
     )
-        .expect("failed to register table");
+    .expect("failed to register table");
 
     let df = ctx
         .sql("SELECT * FROM region")

@@ -1,10 +1,9 @@
-use arrow::datatypes::{DataType};
-use bigdecimal::BigDecimal;
-use snafu::{Snafu};
-use std::{convert, sync::Arc};
-use arrow_schema::{Field, Fields, TimeUnit};
 use super::{Error, Result};
-
+use arrow::datatypes::DataType;
+use arrow_schema::{Field, Fields, TimeUnit};
+use bigdecimal::BigDecimal;
+use snafu::Snafu;
+use std::{convert, sync::Arc};
 
 /// Maps Trino data types to Arrow data types
 pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
@@ -23,22 +22,19 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
         "date" => Ok(DataType::Date32),
         "time" => Ok(DataType::Time64(TimeUnit::Nanosecond)),
         "timestamp" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
-        "timestamp with time zone" => Ok(DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))),
+        "timestamp with time zone" => Ok(DataType::Timestamp(
+            TimeUnit::Microsecond,
+            Some("UTC".into()),
+        )),
         _ if normalized_type.starts_with("decimal") || normalized_type.starts_with("numeric") => {
             parse_decimal_type(&normalized_type)
-        },
+        }
         _ if normalized_type.starts_with("varchar") => Ok(DataType::Utf8),
         _ if normalized_type.starts_with("char") => Ok(DataType::Utf8),
         _ if normalized_type.starts_with("varbinary") => Ok(DataType::Binary),
-        _ if normalized_type.starts_with("array") => {
-            parse_array_type(&normalized_type)
-        },
-        _ if normalized_type.starts_with("map") => {
-            parse_map_type(&normalized_type)
-        },
-        _ if normalized_type.starts_with("row") => {
-            parse_row_type(&normalized_type)
-        },
+        _ if normalized_type.starts_with("array") => parse_array_type(&normalized_type),
+        _ if normalized_type.starts_with("map") => parse_map_type(&normalized_type),
+        _ if normalized_type.starts_with("row") => parse_row_type(&normalized_type),
         _ => Err(Error::UnsupportedTrinoType {
             trino_type: trino_type.to_string(),
         }),
@@ -78,7 +74,11 @@ fn parse_array_type(type_str: &str) -> Result<DataType> {
         if let Some(end) = type_str.rfind(')') {
             let element_type_str = &type_str[start + 1..end];
             let element_type = trino_data_type_to_arrow_type(element_type_str)?;
-            return Ok(DataType::List(Arc::new(Field::new("item", element_type, true))));
+            return Ok(DataType::List(Arc::new(Field::new(
+                "item",
+                element_type,
+                true,
+            ))));
         }
     }
     Err(Error::UnsupportedTrinoType {
@@ -100,10 +100,14 @@ pub(crate) fn parse_map_type(type_str: &str) -> Result<DataType> {
                 let value_type = trino_data_type_to_arrow_type(value_type_str)?;
 
                 return Ok(DataType::Map(
-                    Arc::new(Field::new("entries", DataType::Struct(Fields::from(vec![
-                        Field::new("key", key_type, false),
-                        Field::new("value", value_type, true),
-                    ])), false)),
+                    Arc::new(Field::new(
+                        "entries",
+                        DataType::Struct(Fields::from(vec![
+                            Field::new("key", key_type, false),
+                            Field::new("value", value_type, true),
+                        ])),
+                        false,
+                    )),
                     false,
                 ));
             }

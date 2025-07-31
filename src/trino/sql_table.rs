@@ -43,12 +43,8 @@ impl TrinoTable {
         pool: &Arc<TrinoConnectionPool>,
         table_reference: impl Into<TableReference>,
     ) -> Result<Self, sql_provider_datafusion::Error> {
-        let dyn_pool = Arc::clone(pool)
-            as Arc<
-            dyn DbConnectionPool<Arc<Client>, &'static str>
-            + Send
-            + Sync,
-        >;
+        let dyn_pool =
+            Arc::clone(pool) as Arc<dyn DbConnectionPool<Arc<Client>, &'static str> + Send + Sync>;
 
         // Use a Trino-specific dialect or DefaultDialect for now
         // Trino SQL is close to standard SQL, so DefaultDialect should work well
