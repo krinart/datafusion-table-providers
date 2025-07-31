@@ -83,7 +83,7 @@ fn parse_array_type(type_str: &str) -> Result<DataType> {
     })
 }
 
-pub(crate) fn parse_map_type(type_str: &str) -> Result<DataType> {
+fn parse_map_type(type_str: &str) -> Result<DataType> {
     // Parse "map(key_type, value_type)"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.rfind(')') {
@@ -115,7 +115,7 @@ pub(crate) fn parse_map_type(type_str: &str) -> Result<DataType> {
     })
 }
 
-pub(crate) fn parse_row_type(type_str: &str) -> Result<DataType> {
+fn parse_row_type(type_str: &str) -> Result<DataType> {
     // Parse "row(field1 type1, field2 type2, ...)"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.rfind(')') {
