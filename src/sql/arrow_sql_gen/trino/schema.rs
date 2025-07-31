@@ -7,6 +7,7 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
     let normalized_type = trino_type.to_lowercase();
 
     match normalized_type.as_str() {
+        "null" => Ok(DataType::Null),
         "boolean" => Ok(DataType::Boolean),
         "tinyint" => Ok(DataType::Int8),
         "smallint" => Ok(DataType::Int16),
@@ -31,7 +32,7 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
         _ if normalized_type.starts_with("char") => Ok(DataType::Utf8),
         _ if normalized_type.starts_with("varbinary") => Ok(DataType::Binary),
         _ if normalized_type.starts_with("array") => parse_array_type(&normalized_type),
-        _ if normalized_type.starts_with("map") => parse_map_type(&normalized_type),
+        _ if normalized_type.starts_with("map") => Ok(DataType::Utf8),
         _ if normalized_type.starts_with("row") => parse_row_type(&normalized_type),
         _ => Err(Error::UnsupportedTrinoType {
             trino_type: trino_type.to_string(),
@@ -80,37 +81,6 @@ fn parse_array_type(type_str: &str) -> Result<DataType> {
         }
     }
 
-    Err(Error::UnsupportedTrinoType {
-        trino_type: type_str.to_string(),
-    })
-}
-
-fn parse_map_type(type_str: &str) -> Result<DataType> {
-    if let Some(start) = type_str.find('(') {
-        if let Some(end) = type_str.rfind(')') {
-            let inner = &type_str[start + 1..end];
-            // Simple parsing - would need more sophisticated parsing for nested types
-            if let Some(comma_pos) = inner.find(',') {
-                let key_type_str = inner[..comma_pos].trim();
-                let value_type_str = inner[comma_pos + 1..].trim();
-
-                let key_type = trino_data_type_to_arrow_type(key_type_str)?;
-                let value_type = trino_data_type_to_arrow_type(value_type_str)?;
-
-                return Ok(DataType::Map(
-                    Arc::new(Field::new(
-                        "entries",
-                        DataType::Struct(Fields::from(vec![
-                            Field::new("key", key_type, false),
-                            Field::new("value", value_type, true),
-                        ])),
-                        false,
-                    )),
-                    false,
-                ));
-            }
-        }
-    }
     Err(Error::UnsupportedTrinoType {
         trino_type: type_str.to_string(),
     })
@@ -183,6 +153,10 @@ mod tests {
 
     #[test]
     fn test_basic_types() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("null").unwrap(),
+            DataType::Null
+        );
         assert_eq!(
             trino_data_type_to_arrow_type("boolean").unwrap(),
             DataType::Boolean
@@ -356,49 +330,37 @@ mod tests {
 
     #[test]
     fn test_nested_array_types() {
-        let expected = DataType::List(Arc::new(Field::new(
-            "item",
-            DataType::Utf8,
-            true,
-        )));
+        // Array of array becomes array of strings
         assert_eq!(
             trino_data_type_to_arrow_type("array(array(integer))").unwrap(),
-            expected
+            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+        );
+
+        // Array of maps becomes array of strings
+        assert_eq!(
+            trino_data_type_to_arrow_type("array(map(varchar, integer))").unwrap(),
+            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)))
+        );
+
+        // Array of maps becomes array of strings
+        assert_eq!(
+            trino_data_type_to_arrow_type("array(row(name varchar, age integer))").unwrap(),
+            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)))
         );
     }
 
     #[test]
     fn test_map_types() {
-        let expected = DataType::Map(
-            Arc::new(Field::new(
-                "entries",
-                DataType::Struct(Fields::from(vec![
-                    Field::new("key", DataType::Utf8, false),
-                    Field::new("value", DataType::Int32, true),
-                ])),
-                false,
-            )),
-            false,
-        );
+        // Maps are not supported
+
         assert_eq!(
             trino_data_type_to_arrow_type("map(varchar, integer)").unwrap(),
-            expected
+            DataType::Utf8,
         );
 
-        let expected = DataType::Map(
-            Arc::new(Field::new(
-                "entries",
-                DataType::Struct(Fields::from(vec![
-                    Field::new("key", DataType::Int32, false),
-                    Field::new("value", DataType::Float64, true),
-                ])),
-                false,
-            )),
-            false,
-        );
         assert_eq!(
             trino_data_type_to_arrow_type("map(integer, double)").unwrap(),
-            expected
+            DataType::Utf8,
         );
     }
 
@@ -432,12 +394,6 @@ mod tests {
 
     #[test]
     fn test_complex_nested_types() {
-        let expected = DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)));
-        assert_eq!(
-            trino_data_type_to_arrow_type("array(map(varchar, integer))").unwrap(),
-            expected
-        );
-
         // Row with array field
         let expected_row_array = DataType::Struct(Fields::from(vec![
             Field::new("name", DataType::Utf8, true),
