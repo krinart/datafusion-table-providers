@@ -30,4 +30,7 @@ pub enum Error {
 
     #[snafu(display("Failed to parse decimal value: {value}"))]
     FailedToParseDecimal { value: String },
+
+    #[snafu(display("Failed to downcast builder to expected type: {expected}"))]
+    BuilderDowncastError { expected: String },
 }

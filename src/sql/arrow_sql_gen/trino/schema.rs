@@ -1,11 +1,8 @@
 use super::{Error, Result};
 use arrow::datatypes::DataType;
 use arrow_schema::{Field, Fields, TimeUnit};
-use bigdecimal::BigDecimal;
-use snafu::Snafu;
-use std::{convert, sync::Arc};
+use std::sync::Arc;
 
-/// Maps Trino data types to Arrow data types
 pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
     let normalized_type = trino_type.to_lowercase();
 
@@ -41,7 +38,7 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
     }
 }
 
-pub(crate) fn parse_decimal_type(type_str: &str) -> Result<DataType> {
+fn parse_decimal_type(type_str: &str) -> Result<DataType> {
     // Parse "decimal(precision,scale)" or "decimal(precision)" or just "decimal"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.find(')') {
