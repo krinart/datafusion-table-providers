@@ -865,53 +865,6 @@ fn to_decimal_256(decimal: &BigDecimal) -> i256 {
     i256::from_le_bytes(array)
 }
 
-fn append_struct_value_with_fields(
-    builder: &mut StructBuilder,
-    value: Option<&Value>,
-    fields: &Fields,
-) -> Result<()> {
-    match value {
-        Some(v) if v.is_null() => {
-            // Append null to each field
-            for (i, field) in fields.iter().enumerate() {
-                append_to_struct_field_builder(builder, i, None, field.data_type())?;
-            }
-            builder.append_null();
-        }
-        Some(Value::Object(obj)) => {
-            // Append values by field name
-            for (i, field) in fields.iter().enumerate() {
-                let field_value = obj.get(field.name());
-                append_to_struct_field_builder(builder, i, field_value, field.data_type())?;
-            }
-            builder.append(true);
-        }
-        Some(Value::Array(arr)) => {
-            // Append values by position
-            for (i, field) in fields.iter().enumerate() {
-                let field_value = arr.get(i);
-                append_to_struct_field_builder(builder, i, field_value, field.data_type())?;
-            }
-            builder.append(true);
-        }
-        Some(_) => {
-            // Invalid struct format, append nulls to all fields
-            for (i, field) in fields.iter().enumerate() {
-                append_to_struct_field_builder(builder, i, None, field.data_type())?;
-            }
-            builder.append_null();
-        }
-        None => {
-            // Append null to each field
-            for (i, field) in fields.iter().enumerate() {
-                append_to_struct_field_builder(builder, i, None, field.data_type())?;
-            }
-            builder.append_null();
-        }
-    }
-    Ok(())
-}
-
 fn append_to_struct_field_builder(
     builder: &mut StructBuilder,
     field_index: usize,
