@@ -182,3 +182,8 @@ required-features = ["mongodb"]
 name = "trino"
 path = "examples/trino.rs"
 required-features = ["trino"]
+
+[[example]]
+name = "trino_2"
+path = "examples/trino_2.rs"
+required-features = ["trino"]

@@ -69,8 +69,6 @@ impl TrinoTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        println!("projections!!: {:?}", projections);
-        println!("schema!!: {:?}", projections);
         Ok(Arc::new(TrinoSQLExec::new(
             projections,
             schema,

@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretBox, SecretString};
+use serde_json::Value;
 use snafu::{ResultExt, Snafu};
 // use tokio_postgres::types::ToSql;
 
@@ -190,14 +191,12 @@ impl TrinoConnectionPool {
 
         // Build HTTP client
         let mut headers = reqwest::header::HeaderMap::new();
-        // headers.insert("X-Trino-Catalog", catalog.parse().unwrap());
-        // headers.insert("X-Trino-Schema", schema.parse().unwrap());
+        headers.insert("X-Trino-Catalog", catalog.parse().unwrap());
+        headers.insert("X-Trino-Schema", schema.parse().unwrap());
 
         if let Some(ref user) = user {
             headers.insert("X-Trino-User", user.parse().unwrap());
         }
-
-        println!("headers!!: {:?}", headers);
 
         let mut client_builder = Client::builder()
             .default_headers(headers)

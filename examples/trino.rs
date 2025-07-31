@@ -77,15 +77,12 @@ async fn main() {
     );
 
     // Create Trino table provider factory
-    // Used to generate TableProvider instances that can read Trino table data
     let table_factory = TrinoTableFactory::new(trino_pool.clone());
 
     // Create DataFusion session context
     let ctx = SessionContext::new();
 
-    // Demonstrate direct table provider registration
-    // This method registers the table in the default catalog
-    // Here we register the Trino "region" table as "region"
+    // Register the Trino "region" table as "region"
     ctx.register_table(
         "region",
         table_factory
