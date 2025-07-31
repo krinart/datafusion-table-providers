@@ -69,14 +69,17 @@ fn parse_array_type(type_str: &str) -> Result<DataType> {
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.rfind(')') {
             let element_type_str = &type_str[start + 1..end];
-            let element_type = trino_data_type_to_arrow_type(element_type_str)?;
-            return Ok(DataType::List(Arc::new(Field::new(
-                "item",
-                element_type,
-                true,
-            ))));
+            return match trino_data_type_to_arrow_type(element_type_str)? {
+                DataType::Struct(_) | DataType::List(_) | DataType::Map(_, _) => {
+                    Ok(DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))))
+                }
+                inner_arrow_type => {
+                    Ok(DataType::List(Arc::new(Field::new("item", inner_arrow_type, true))))
+                }
+            };
         }
     }
+
     Err(Error::UnsupportedTrinoType {
         trino_type: type_str.to_string(),
     })

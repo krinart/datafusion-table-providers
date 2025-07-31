@@ -48,6 +48,8 @@ pub fn rows_to_arrow(rows: &[Vec<Value>], columns: &Vec<TrinoColumn>) -> Result<
 
     let arrays = finish_builders(builders, &schema)?;
 
+    println!("schema: {:?}", schema);
+
     RecordBatch::try_new(Arc::new(schema), arrays).context(FailedToBuildRecordBatchSnafu)
 }
 
@@ -193,7 +195,6 @@ fn create_list_builder_for_field(
     inner_field: &Field,
     capacity: usize,
 ) -> Result<Box<dyn ArrayBuilder>> {
-    println!("Creating list builder for field: {:?}", inner_field);
     match inner_field.data_type() {
         DataType::Boolean => {
             let values_builder: Box<dyn ArrayBuilder> =
@@ -1932,30 +1933,30 @@ mod tests {
         assert_eq!(result.num_columns(), 1);
     }
 
-    // #[test]
-    // fn test_complex_nested_list() {
-    //     let columns = create_test_columns(vec![(
-    //         "nested_list",
-    //         "array(row(id integer, tags array(varchar)))",
-    //     )]);
-    //
-    //     let rows = vec![vec![json!([
-    //     {
-    //         "id": 1,
-    //         "tags": ["rust", "arrow", "data"]
-    //     },
-    //     {
-    //         "id": 2,
-    //         "tags": ["programming", "testing"]
-    //     }
-    // ])]];
-    //
-    //     let result = rows_to_arrow(&rows, &columns).unwrap();
-    //     assert_eq!(result.num_rows(), 1);
-    //     assert_eq!(result.num_columns(), 1);
-    // }
-    //
-    // #[test]
+    #[test]
+    fn test_complex_nested_list() {
+        let columns = create_test_columns(vec![(
+            "nested_list",
+            "array(row(id integer, tags array(varchar)))",
+        )]);
+
+        let rows = vec![vec![json!([
+            {
+                "id": 1,
+                "tags": ["rust", "arrow", "data"]
+            },
+            {
+                "id": 2,
+                "tags": ["programming", "testing"]
+            }
+        ])]];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 1);
+        assert_eq!(result.num_columns(), 1);
+    }
+
+    #[test]
     // fn test_complex_nested_map() {
     //     let columns = create_test_columns(vec![(
     //         "nested_map",
@@ -1963,15 +1964,15 @@ mod tests {
     //     )]);
     //
     //     let rows = vec![vec![json!({
-    //     "users": {
-    //         "count": 100,
-    //         "metadata": ["active", "verified"]
-    //     },
-    //     "orders": {
-    //         "count": 250,
-    //         "metadata": ["pending", "completed"]
-    //     }
-    // })]];
+    //         "users": {
+    //             "count": 100,
+    //             "metadata": ["active", "verified"]
+    //         },
+    //         "orders": {
+    //             "count": 250,
+    //             "metadata": ["pending", "completed"]
+    //         }
+    //     })]];
     //
     //     let result = rows_to_arrow(&rows, &columns).unwrap();
     //     assert_eq!(result.num_rows(), 1);
