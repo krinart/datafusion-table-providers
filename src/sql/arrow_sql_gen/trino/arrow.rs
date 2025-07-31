@@ -10,14 +10,14 @@ use arrow::{
     },
     datatypes::{i256, DataType, Date32Type, Field, Fields, Schema, TimeUnit},
 };
+use arrow_schema::ArrowError;
 use bigdecimal::BigDecimal;
 use bigdecimal::ToPrimitive;
 use chrono::{NaiveDate, NaiveTime, Timelike};
 use serde_json::Value;
 use snafu::ResultExt;
-use std::{collections::HashMap, sync::Arc};
 use std::any::Any;
-use arrow_schema::ArrowError;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub struct TrinoColumn {
@@ -806,7 +806,10 @@ fn append_timestamp_value(
     Ok(())
 }
 
-fn append_decimal128_value(builder: &mut Decimal128BuilderWrapper, value: Option<&Value>) -> Result<()> {
+fn append_decimal128_value(
+    builder: &mut Decimal128BuilderWrapper,
+    value: Option<&Value>,
+) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(decimal_str)) => {
@@ -841,7 +844,10 @@ fn append_decimal128_value(builder: &mut Decimal128BuilderWrapper, value: Option
     Ok(())
 }
 
-fn append_decimal256_value(builder: &mut Decimal256BuilderWrapper, value: Option<&Value>) -> Result<()> {
+fn append_decimal256_value(
+    builder: &mut Decimal256BuilderWrapper,
+    value: Option<&Value>,
+) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(decimal_str)) => {
@@ -1433,8 +1439,6 @@ fn append_struct_value(
     Ok(())
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1525,8 +1529,13 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert!((array.value(i) - expected_value).abs() < f32::EPSILON,
-                    "Mismatch at index {}: expected {}, got {}", i, expected_value, array.value(i));
+            assert!(
+                (array.value(i) - expected_value).abs() < f32::EPSILON,
+                "Mismatch at index {}: expected {}, got {}",
+                i,
+                expected_value,
+                array.value(i)
+            );
         }
     }
 
@@ -1539,8 +1548,13 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert!((array.value(i) - expected_value).abs() < f64::EPSILON,
-                    "Mismatch at index {}: expected {}, got {}", i, expected_value, array.value(i));
+            assert!(
+                (array.value(i) - expected_value).abs() < f64::EPSILON,
+                "Mismatch at index {}: expected {}, got {}",
+                i,
+                expected_value,
+                array.value(i)
+            );
         }
     }
 
@@ -1557,7 +1571,11 @@ mod tests {
         }
     }
 
-    fn assert_int32_array_with_nulls(record_batch: &RecordBatch, column_index: usize, expected: Vec<Option<i32>>) {
+    fn assert_int32_array_with_nulls(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<Option<i32>>,
+    ) {
         let array = record_batch
             .column(column_index)
             .as_any()
@@ -1578,7 +1596,11 @@ mod tests {
         }
     }
 
-    fn assert_string_array_with_nulls(record_batch: &RecordBatch, column_index: usize, expected: Vec<Option<&str>>) {
+    fn assert_string_array_with_nulls(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<Option<&str>>,
+    ) {
         let array = record_batch
             .column(column_index)
             .as_any()
@@ -1612,7 +1634,11 @@ mod tests {
         }
     }
 
-    fn assert_time64_nanosecond_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i64>) {
+    fn assert_time64_nanosecond_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<i64>,
+    ) {
         let array = record_batch
             .column(column_index)
             .as_any()
@@ -1625,7 +1651,11 @@ mod tests {
         }
     }
 
-    fn assert_timestamp_microsecond_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i64>) {
+    fn assert_timestamp_microsecond_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<i64>,
+    ) {
         let array = record_batch
             .column(column_index)
             .as_any()
@@ -1638,7 +1668,11 @@ mod tests {
         }
     }
 
-    fn assert_decimal128_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<i128>) {
+    fn assert_decimal128_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<i128>,
+    ) {
         let array = record_batch
             .column(column_index)
             .as_any()
@@ -1651,7 +1685,11 @@ mod tests {
         }
     }
 
-    fn assert_decimal256_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<arrow::datatypes::i256>) {
+    fn assert_decimal256_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<arrow::datatypes::i256>,
+    ) {
         let array = record_batch
             .column(column_index)
             .as_any()
@@ -1737,11 +1775,14 @@ mod tests {
         assert_int8_array(&result, 1, vec![127, -128]);
         assert_int16_array(&result, 2, vec![32767, -32768]);
         assert_int32_array(&result, 3, vec![2147483647, -2147483648]);
-        assert_int64_array(&result, 4, vec![9223372036854775807i64, -9223372036854775808i64]);
+        assert_int64_array(
+            &result,
+            4,
+            vec![9223372036854775807i64, -9223372036854775808i64],
+        );
         assert_float32_array(&result, 5, vec![3.14f32, -1.23f32]);
         assert_float64_array(&result, 6, vec![2.718281828, -9.876543210]);
         assert_string_array(&result, 7, vec!["hello", "world"]);
-
     }
 
     #[test]
@@ -1790,7 +1831,10 @@ mod tests {
         assert_eq!(result.num_columns(), 3);
 
         let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-        let date1 = NaiveDate::from_ymd_opt(2023, 12, 25).unwrap().signed_duration_since(epoch).num_days() as i32;
+        let date1 = NaiveDate::from_ymd_opt(2023, 12, 25)
+            .unwrap()
+            .signed_duration_since(epoch)
+            .num_days() as i32;
         let date2 = 0; // 1970-01-01 is day 0
 
         fn time_to_nanos(time_str: &str) -> i64 {
@@ -1802,7 +1846,9 @@ mod tests {
         let time2 = time_to_nanos("00:00:00.000000000");
 
         // Timestamp: microseconds since Unix epoch
-        let timestamp1 = chrono::DateTime::parse_from_rfc3339("2023-12-25T14:30:45.123456Z").unwrap().timestamp_micros();
+        let timestamp1 = chrono::DateTime::parse_from_rfc3339("2023-12-25T14:30:45.123456Z")
+            .unwrap()
+            .timestamp_micros();
         let timestamp2 = 0; // 1970-01-01T00:00:00.000000Z
 
         assert_date32_array(&result, 0, vec![date1, date2]);
@@ -1836,14 +1882,8 @@ mod tests {
         ]);
 
         let rows = vec![
-            vec![
-                json!("123.45"),
-                json!("999999999999.9999")
-            ],
-            vec![
-                json!("0.00"),
-                json!("0.0000")
-            ],
+            vec![json!("123.45"), json!("999999999999.9999")],
+            vec![json!("0.00"), json!("0.0000")],
         ];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
@@ -1854,7 +1894,9 @@ mod tests {
         fn decimal_to_scaled_int128(decimal_str: &str, scale: u8) -> i128 {
             let decimal = decimal_str.parse::<bigdecimal::BigDecimal>().unwrap();
             let scale_factor = 10_i128.pow(scale as u32);
-            (decimal * bigdecimal::BigDecimal::from(scale_factor)).to_i128().unwrap()
+            (decimal * bigdecimal::BigDecimal::from(scale_factor))
+                .to_i128()
+                .unwrap()
         }
 
         fn decimal_to_scaled_int256(decimal_str: &str, scale: u8) -> arrow::datatypes::i256 {
