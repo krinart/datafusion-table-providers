@@ -39,7 +39,6 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
 }
 
 fn parse_decimal_type(type_str: &str) -> Result<DataType> {
-    // Parse "decimal(precision,scale)" or "decimal(precision)" or just "decimal"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.find(')') {
             let params = &type_str[start + 1..end];
@@ -66,7 +65,6 @@ fn parse_decimal_type(type_str: &str) -> Result<DataType> {
 }
 
 fn parse_array_type(type_str: &str) -> Result<DataType> {
-    // Parse "array(element_type)"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.rfind(')') {
             let element_type_str = &type_str[start + 1..end];
@@ -139,4 +137,299 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
     Err(Error::UnsupportedTrinoType {
         trino_type: type_str.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_basic_types() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("boolean").unwrap(),
+            DataType::Boolean
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("tinyint").unwrap(),
+            DataType::Int8
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("smallint").unwrap(),
+            DataType::Int16
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("integer").unwrap(),
+            DataType::Int32
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("bigint").unwrap(),
+            DataType::Int64
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("real").unwrap(),
+            DataType::Float32
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("double").unwrap(),
+            DataType::Float64
+        );
+    }
+
+    #[test]
+    fn test_string_types() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("varchar").unwrap(),
+            DataType::Utf8
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("char").unwrap(),
+            DataType::Utf8
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("varbinary").unwrap(),
+            DataType::Utf8
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("json").unwrap(),
+            DataType::LargeUtf8
+        );
+    }
+
+    #[test]
+    fn test_parametrized_string_types() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("varchar(255)").unwrap(),
+            DataType::Utf8
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("char(10)").unwrap(),
+            DataType::Utf8
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("varbinary(1000)").unwrap(),
+            DataType::Binary
+        );
+    }
+
+    #[test]
+    fn test_temporal_types() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("date").unwrap(),
+            DataType::Date32
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("time").unwrap(),
+            DataType::Time64(TimeUnit::Nanosecond)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp").unwrap(),
+            DataType::Timestamp(TimeUnit::Microsecond, None)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("BOOLEAN").unwrap(),
+            DataType::Boolean
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("Boolean").unwrap(),
+            DataType::Boolean
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("VARCHAR").unwrap(),
+            DataType::Utf8
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("TIMESTAMP WITH TIME ZONE").unwrap(),
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
+    }
+
+    #[test]
+    fn test_decimal_types() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("decimal").unwrap(),
+            DataType::Decimal128(38, 0)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("decimal(10)").unwrap(),
+            DataType::Decimal128(10, 0)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("decimal(10,2)").unwrap(),
+            DataType::Decimal128(10, 2)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("decimal(50,10)").unwrap(),
+            DataType::Decimal256(50, 10)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("numeric(10,2)").unwrap(),
+            DataType::Decimal128(10, 2)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("decimal(38,0)").unwrap(),
+            DataType::Decimal128(38, 0)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("decimal(39,0)").unwrap(),
+            DataType::Decimal256(39, 0)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("decimal(10").unwrap(),
+            DataType::Decimal128(38, 0)
+        );
+    }
+
+    #[test]
+    fn test_array_types() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("array(integer)").unwrap(),
+            DataType::List(Arc::new(Field::new("item", DataType::Int32, true)))
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("array(varchar)").unwrap(),
+            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)))
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("array(decimal(10,2))").unwrap(),
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Decimal128(10, 2),
+                true
+            )))
+        );
+    }
+
+    #[test]
+    fn test_nested_array_types() {
+        let expected = DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::List(Arc::new(Field::new("item", DataType::Int32, true))),
+            true,
+        )));
+        assert_eq!(
+            trino_data_type_to_arrow_type("array(array(integer))").unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_map_types() {
+        let expected = DataType::Map(
+            Arc::new(Field::new(
+                "entries",
+                DataType::Struct(Fields::from(vec![
+                    Field::new("key", DataType::Utf8, false),
+                    Field::new("value", DataType::Int32, true),
+                ])),
+                false,
+            )),
+            false,
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("map(varchar, integer)").unwrap(),
+            expected
+        );
+
+        let expected = DataType::Map(
+            Arc::new(Field::new(
+                "entries",
+                DataType::Struct(Fields::from(vec![
+                    Field::new("key", DataType::Int32, false),
+                    Field::new("value", DataType::Float64, true),
+                ])),
+                false,
+            )),
+            false,
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("map(integer, double)").unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_row_types() {
+        let expected = DataType::Struct(Fields::from(vec![
+            Field::new("name", DataType::Utf8, true),
+            Field::new("age", DataType::Int32, true),
+        ]));
+        assert_eq!(
+            trino_data_type_to_arrow_type("row(name varchar, age integer)").unwrap(),
+            expected
+        );
+
+        // let expected_multi = DataType::Struct(Fields::from(vec![
+        //     Field::new("id", DataType::Int64, true),
+        //     Field::new("name", DataType::Utf8, true),
+        //     Field::new("salary", DataType::Decimal128(10, 2), true),
+        //     Field::new("active", DataType::Boolean, true),
+        // ]));
+        // assert_eq!(
+        //     trino_data_type_to_arrow_type("row(id bigint, name varchar, salary decimal(10,2), active boolean)").unwrap(),
+        //     expected_multi
+        // );
+    }
+
+    #[test]
+    fn test_complex_nested_types() {
+        // Array of maps
+        let map_type = DataType::Map(
+            Arc::new(Field::new(
+                "entries",
+                DataType::Struct(Fields::from(vec![
+                    Field::new("key", DataType::Utf8, false),
+                    Field::new("value", DataType::Int32, true),
+                ])),
+                false,
+            )),
+            false,
+        );
+        let expected = DataType::List(Arc::new(Field::new("item", map_type, true)));
+        assert_eq!(
+            trino_data_type_to_arrow_type("array(map(varchar, integer))").unwrap(),
+            expected
+        );
+
+        // Row with array field
+        let expected_row_array = DataType::Struct(Fields::from(vec![
+            Field::new("name", DataType::Utf8, true),
+            Field::new(
+                "scores",
+                DataType::List(Arc::new(Field::new("item", DataType::Int32, true))),
+                true,
+            ),
+        ]));
+        assert_eq!(
+            trino_data_type_to_arrow_type("row(name varchar, scores array(integer))").unwrap(),
+            expected_row_array
+        );
+    }
+
+    #[test]
+    fn test_unsupported_types() {
+        let result = trino_data_type_to_arrow_type("unknown_type");
+        assert!(result.is_err());
+        if let Err(Error::UnsupportedTrinoType { trino_type }) = result {
+            assert_eq!(trino_type, "unknown_type");
+        }
+    }
 }
