@@ -1,6 +1,6 @@
 use std::{any::Any, sync::Arc};
 
-use crate::sql::arrow_sql_gen::trino::{self, schema::trino_data_type_to_arrow_type, arrow::rows_to_arrow};
+use crate::sql::arrow_sql_gen::trino::{self, schema::trino_data_type_to_arrow_type, arrow::{rows_to_arrow, TrinoColumn}};
 use crate::util::handle_unsupported_type_error;
 use arrow::datatypes::Field;
 use arrow::datatypes::Schema;
@@ -17,8 +17,6 @@ use snafu::prelude::*;
 use tokio::time::sleep;
 use crate::UnsupportedTypeAction;
 use std::time::Duration;
-use arrow_schema::{DataType, TimeUnit};
-use crate::sql::arrow_sql_gen::trino::arrow::TrinoColumn;
 use super::AsyncDbConnection;
 use super::DbConnection;
 use super::Result;
@@ -36,7 +34,7 @@ pub enum Error {
     QueryError { source: reqwest::Error },
 
     #[snafu(display("Failed to convert query result to Arrow.\n{source}\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
-    ConversionError { source: trino::arrow::Error },
+    ConversionError { source: trino::Error },
 
     #[snafu(display("Authentication failed."))]
     AuthenticationFailedError,
@@ -233,7 +231,7 @@ impl TrinoConnection {
 
     async fn execute_query(&self, sql: &str) -> Result<TrinoQueryResult, Error> {
         println!("Executing query: {}", sql);
-        
+
         let url = format!("{}/v1/statement", self.base_url);
 
         // Step 1: Submit the query
