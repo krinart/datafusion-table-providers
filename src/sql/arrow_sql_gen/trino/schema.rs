@@ -114,19 +114,20 @@ fn parse_map_type(type_str: &str) -> Result<DataType> {
 }
 
 fn parse_row_type(type_str: &str) -> Result<DataType> {
-    // Parse "row(field1 type1, field2 type2, ...)"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.rfind(')') {
             let inner = &type_str[start + 1..end];
             let mut fields = Vec::new();
 
-            // Simple parsing - would need more sophisticated parsing for complex nested types
-            for field_def in inner.split(',') {
-                let parts: Vec<&str> = field_def.trim().split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let field_name = parts[0];
-                    let field_type = parts[1..].join(" ");
-                    let arrow_type = trino_data_type_to_arrow_type(&field_type)?;
+            // To handle commas inside parentheses
+            let field_definitions = split_respecting_parentheses(inner, ',');
+
+            for field_def in field_definitions {
+                let field_def = field_def.trim();
+                if let Some(space_pos) = field_def.find(' ') {
+                    let field_name = field_def[..space_pos].trim();
+                    let field_type = field_def[space_pos + 1..].trim();
+                    let arrow_type = trino_data_type_to_arrow_type(field_type)?;
                     fields.push(Field::new(field_name, arrow_type, true));
                 }
             }
@@ -137,6 +138,38 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
     Err(Error::UnsupportedTrinoType {
         trino_type: type_str.to_string(),
     })
+}
+
+fn split_respecting_parentheses(s: &str, delimiter: char) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0;
+
+    for ch in s.chars() {
+        match ch {
+            '(' => {
+                paren_depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                paren_depth -= 1;
+                current.push(ch);
+            }
+            ch if ch == delimiter && paren_depth == 0 => {
+                result.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        result.push(current.trim().to_string());
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -367,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn test_row_types() {
+    fn test_row_type_simple() {
         let expected = DataType::Struct(Fields::from(vec![
             Field::new("name", DataType::Utf8, true),
             Field::new("age", DataType::Int32, true),
@@ -376,17 +409,22 @@ mod tests {
             trino_data_type_to_arrow_type("row(name varchar, age integer)").unwrap(),
             expected
         );
+    }
 
-        // let expected_multi = DataType::Struct(Fields::from(vec![
-        //     Field::new("id", DataType::Int64, true),
-        //     Field::new("name", DataType::Utf8, true),
-        //     Field::new("salary", DataType::Decimal128(10, 2), true),
-        //     Field::new("active", DataType::Boolean, true),
-        // ]));
-        // assert_eq!(
-        //     trino_data_type_to_arrow_type("row(id bigint, name varchar, salary decimal(10,2), active boolean)").unwrap(),
-        //     expected_multi
-        // );
+    fn test_row_type_complex() {
+        let expected_multi = DataType::Struct(Fields::from(vec![
+            Field::new("id", DataType::Int64, true),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("salary", DataType::Decimal128(10, 2), true),
+            Field::new("active", DataType::Boolean, true),
+        ]));
+        assert_eq!(
+            trino_data_type_to_arrow_type(
+                "row(id bigint, name varchar, salary decimal(10,2), active boolean)"
+            )
+            .unwrap(),
+            expected_multi
+        );
     }
 
     #[test]
