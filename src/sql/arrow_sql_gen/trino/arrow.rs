@@ -1278,6 +1278,37 @@ fn append_to_struct_field_builder(
                 })?;
             append_decimal256_value(field_builder, value)?;
         }
+        // DataType::List(_) => {
+        //     // For lists in structs, we need to handle this differently
+        //     // Get the list builder and call append_list_value on it
+        //     let field_builders = builder.field_builders();
+        //     if let Some(list_builder) = field_builders.get_mut(field_index) {
+        //         append_list_value(list_builder.as_mut(), value)?;
+        //     } else {
+        //         return Err(Error::BuilderDowncastError {
+        //             expected: format!("ListBuilder at index {}", field_index),
+        //         });
+        //     }
+        // }
+        DataType::Struct(nested_fields) => {
+            let nested_struct_builder = builder
+                .field_builder::<StructBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "StructBuilder".to_string(),
+                })?;
+            append_struct_value(nested_struct_builder, value, nested_fields)?;
+        }
+        // DataType::Map(_, _) => {
+        //     // For maps in structs, similar approach
+        //     let field_builders = builder.field_builders();
+        //     if let Some(map_builder) = field_builders.get_mut(field_index) {
+        //         append_map_value(map_builder.as_mut(), value)?;
+        //     } else {
+        //         return Err(Error::BuilderDowncastError {
+        //             expected: format!("MapBuilder at index {}", field_index),
+        //         });
+        //     }
+        // }
         DataType::Null => {
             let field_builder = builder
                 .field_builder::<NullBuilder>(field_index)
@@ -1900,4 +1931,116 @@ mod tests {
         assert_eq!(result.num_rows(), 1);
         assert_eq!(result.num_columns(), 1);
     }
+
+    // #[test]
+    // fn test_complex_nested_list() {
+    //     let columns = create_test_columns(vec![(
+    //         "nested_list",
+    //         "array(row(id integer, tags array(varchar)))",
+    //     )]);
+    //
+    //     let rows = vec![vec![json!([
+    //     {
+    //         "id": 1,
+    //         "tags": ["rust", "arrow", "data"]
+    //     },
+    //     {
+    //         "id": 2,
+    //         "tags": ["programming", "testing"]
+    //     }
+    // ])]];
+    //
+    //     let result = rows_to_arrow(&rows, &columns).unwrap();
+    //     assert_eq!(result.num_rows(), 1);
+    //     assert_eq!(result.num_columns(), 1);
+    // }
+    //
+    // #[test]
+    // fn test_complex_nested_map() {
+    //     let columns = create_test_columns(vec![(
+    //         "nested_map",
+    //         "map(varchar, row(count integer, metadata array(varchar)))",
+    //     )]);
+    //
+    //     let rows = vec![vec![json!({
+    //     "users": {
+    //         "count": 100,
+    //         "metadata": ["active", "verified"]
+    //     },
+    //     "orders": {
+    //         "count": 250,
+    //         "metadata": ["pending", "completed"]
+    //     }
+    // })]];
+    //
+    //     let result = rows_to_arrow(&rows, &columns).unwrap();
+    //     assert_eq!(result.num_rows(), 1);
+    //     assert_eq!(result.num_columns(), 1);
+    // }
+    //
+    // #[test]
+    // fn test_list_of_structs_with_nested_lists() {
+    //     let columns = create_test_columns(vec![(
+    //         "complex_nested",
+    //         "array(row(user_id integer, permissions array(varchar), profile row(name varchar, settings array(varchar))))",
+    //     )]);
+    //
+    //     let rows = vec![vec![json!([
+    //     {
+    //         "user_id": 1,
+    //         "permissions": ["read", "write"],
+    //         "profile": {
+    //             "name": "Alice",
+    //             "settings": ["dark_mode", "notifications"]
+    //         }
+    //     },
+    //     {
+    //         "user_id": 2,
+    //         "permissions": ["read"],
+    //         "profile": {
+    //             "name": "Bob",
+    //             "settings": ["light_mode"]
+    //         }
+    //     }
+    // ])]];
+    //
+    //     let result = rows_to_arrow(&rows, &columns).unwrap();
+    //     assert_eq!(result.num_rows(), 1);
+    //     assert_eq!(result.num_columns(), 1);
+    // }
+    //
+    // #[test]
+    // fn test_map_with_nested_structs_and_lists() {
+    //     let columns = create_test_columns(vec![(
+    //         "deeply_nested_map",
+    //         "map(varchar, row(info row(description varchar, tags array(varchar)), stats row(count integer, active boolean)))",
+    //     )]);
+    //
+    //     let rows = vec![vec![json!({
+    //     "project_alpha": {
+    //         "info": {
+    //             "description": "First project",
+    //             "tags": ["experimental", "rust"]
+    //         },
+    //         "stats": {
+    //             "count": 42,
+    //             "active": true
+    //         }
+    //     },
+    //     "project_beta": {
+    //         "info": {
+    //             "description": "Second project",
+    //             "tags": ["stable", "production"]
+    //         },
+    //         "stats": {
+    //             "count": 128,
+    //             "active": false
+    //         }
+    //     }
+    // })]];
+    //
+    //     let result = rows_to_arrow(&rows, &columns).unwrap();
+    //     assert_eq!(result.num_rows(), 1);
+    //     assert_eq!(result.num_columns(), 1);
+    // }
 }
