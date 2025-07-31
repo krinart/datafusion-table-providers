@@ -189,15 +189,20 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
     }
 }
 
-fn create_list_builder_for_field(inner_field: &Field, capacity: usize) -> Result<Box<dyn ArrayBuilder>> {
+fn create_list_builder_for_field(
+    inner_field: &Field,
+    capacity: usize,
+) -> Result<Box<dyn ArrayBuilder>> {
     println!("Creating list builder for field: {:?}", inner_field);
     match inner_field.data_type() {
         DataType::Boolean => {
-            let values_builder: Box<dyn ArrayBuilder> = Box::new(BooleanBuilder::with_capacity(capacity * 4));
+            let values_builder: Box<dyn ArrayBuilder> =
+                Box::new(BooleanBuilder::with_capacity(capacity * 4));
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Int8 => {
-            let values_builder: Box<dyn ArrayBuilder> = Box::new(Int8Builder::with_capacity(capacity * 4));
+            let values_builder: Box<dyn ArrayBuilder> =
+                Box::new(Int8Builder::with_capacity(capacity * 4));
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Int16 => {
@@ -245,17 +250,15 @@ fn create_list_builder_for_field(inner_field: &Field, capacity: usize) -> Result
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Decimal128(precision, scale) => {
-            let values_builder =
-                Decimal128Builder::with_capacity(capacity * 4)
-                    .with_precision_and_scale(*precision, *scale)
-                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            let values_builder = Decimal128Builder::with_capacity(capacity * 4)
+                .with_precision_and_scale(*precision, *scale)
+                .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Decimal256(precision, scale) => {
-            let values_builder =
-                Decimal256Builder::with_capacity(capacity * 4)
-                    .with_precision_and_scale(*precision, *scale)
-                    .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            let values_builder = Decimal256Builder::with_capacity(capacity * 4)
+                .with_precision_and_scale(*precision, *scale)
+                .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Null => {
@@ -268,7 +271,6 @@ fn create_list_builder_for_field(inner_field: &Field, capacity: usize) -> Result
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
     }
-
 }
 
 fn append_row_to_builders(
@@ -1586,10 +1588,7 @@ mod tests {
         let columns = create_test_columns(vec![("binary_col", "varbinary")]);
 
         let base64_data = base64::encode(b"hello world");
-        let rows = vec![
-            vec![json!(base64_data)],
-            vec![json!("plain text")],
-        ];
+        let rows = vec![vec![json!(base64_data)], vec![json!("plain text")]];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
         assert_eq!(result.num_rows(), 2);
@@ -1655,8 +1654,8 @@ mod tests {
 
         // Values that exceed the respective integer type limits
         let rows = vec![vec![
-            json!(1000), // Exceeds i8::MAX (127)
-            json!(100000), // Exceeds i16::MAX (32767)
+            json!(1000),                   // Exceeds i8::MAX (127)
+            json!(100000),                 // Exceeds i16::MAX (32767)
             json!(9223372036854775807i64), // Exceeds i32::MAX
         ]];
 
@@ -1732,10 +1731,7 @@ mod tests {
 
     #[test]
     fn test_large_dataset() {
-        let columns = create_test_columns(vec![
-            ("id", "bigint"),
-            ("value", "varchar"),
-        ]);
+        let columns = create_test_columns(vec![("id", "bigint"), ("value", "varchar")]);
 
         // Create 1000 rows of test data
         let mut rows = Vec::new();
@@ -1767,10 +1763,8 @@ mod tests {
 
     #[test]
     fn test_mixed_null_and_valid_data() {
-        let columns = create_test_columns(vec![
-            ("mixed_int", "integer"),
-            ("mixed_string", "varchar"),
-        ]);
+        let columns =
+            create_test_columns(vec![("mixed_int", "integer"), ("mixed_string", "varchar")]);
 
         let rows = vec![
             vec![json!(1), json!("first")],
@@ -1892,9 +1886,10 @@ mod tests {
 
     #[test]
     fn test_complex_nested_struct() {
-        let columns = create_test_columns(vec![
-            ("nested_struct", "row(person row(name varchar, age integer), active boolean)")
-        ]);
+        let columns = create_test_columns(vec![(
+            "nested_struct",
+            "row(person row(name varchar, age integer), active boolean)",
+        )]);
 
         let rows = vec![vec![json!({
             "person": {"name": "John", "age": 30},

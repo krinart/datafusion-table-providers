@@ -35,7 +35,5 @@ pub enum Error {
     BuilderDowncastError { expected: String },
 
     #[snafu(display("Invalid or unsupported data type: {data_type}"))]
-    InvalidDataType {
-        data_type: String,
-    },
+    InvalidDataType { data_type: String },
 }
