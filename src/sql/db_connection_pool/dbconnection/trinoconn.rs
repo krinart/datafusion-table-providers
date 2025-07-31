@@ -1,6 +1,6 @@
 use std::{any::Any, sync::Arc};
 
-use crate::sql::arrow_sql_gen::trino::{self, schema::data_type_to_arrow_type, arrow::rows_to_arrow};
+use crate::sql::arrow_sql_gen::trino::{self, schema::trino_data_type_to_arrow_type, arrow::rows_to_arrow};
 use crate::util::handle_unsupported_type_error;
 use arrow::datatypes::Field;
 use arrow::datatypes::Schema;
@@ -18,9 +18,17 @@ use tokio::time::sleep;
 use crate::UnsupportedTypeAction;
 use std::time::Duration;
 use arrow_schema::{DataType, TimeUnit};
+use crate::sql::arrow_sql_gen::trino::arrow::TrinoColumn;
 use super::AsyncDbConnection;
 use super::DbConnection;
 use super::Result;
+
+#[derive(Debug, Clone)]
+pub struct TrinoQueryResult {
+    pub data: Vec<Vec<Value>>,
+    pub columns: Vec<TrinoColumn>,
+}
+
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -90,9 +98,8 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
         let sql = format!("DESCRIBE {}", table_reference.to_string());
-        // let sql = format!("DESCRIBE tpch.tiny.region");
 
-        let data_rows = self.execute_query(&sql).await.map_err(|e| {
+        let query_result = self.execute_query(&sql).await.map_err(|e| {
             super::Error::UnableToGetSchema {
                 source: Box::new(e),
             }
@@ -102,7 +109,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 
         // println!("data rows: {:?}", data_rows);
 
-        for row_data in data_rows {
+        for row_data in query_result.data {
             if row_data.len() >= 2 {
                 let column_name = row_data[0]
                     .as_str()
@@ -126,7 +133,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                     true
                 };
 
-                let Ok(arrow_type) = data_type_to_arrow_type(data_type) else {
+                let Ok(arrow_type) = trino_data_type_to_arrow_type(data_type) else {
                     handle_unsupported_type_error(
                         self.unsupported_type_action,
                         super::Error::UnsupportedDataType {
@@ -143,7 +150,6 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 
         let schema = Arc::new(Schema::new(fields));
 
-        println!("schema!!: {:?}", schema);
         Ok(schema)
     }
 
@@ -151,47 +157,22 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         &self,
         sql: &str,
         _params: &[&'a str],
-        projected_schema: Option<SchemaRef>,
+        _projected_schema: Option<SchemaRef>,
     ) -> Result<SendableRecordBatchStream> {
-        // println!("query_arrow!!: {:?}", sql);
-
-        let data_rows = self.execute_query(sql).await.map_err(|e| {
+        let query_result = self.execute_query(sql).await.map_err(|e| {
             super::Error::UnableToQueryArrow {
                 source: Box::new(e),
             }
         })?;
 
+        let data_rows = query_result.data;
+        let columns = query_result.columns;
+
         let mut stream = Box::pin(stream! {
             if !data_rows.is_empty() {
-                // For the new format, we need to get column information separately
-                // This might require a separate DESCRIBE query or the column info
-                // should be returned along with the data from execute_query
-
-                // For now, we'll need to infer columns or get them from projected_schema
-                let columns = if let Some(ref schema) = projected_schema {
-                    // Build column info from projected schema
-                    schema.fields().iter().map(|field| {
-                        serde_json::json!({
-                            "name": field.name(),
-                            "type": arrow_type_to_trino_type_string(field.data_type())
-                        })
-                    }).collect::<Vec<_>>()
-                } else {
-                    // If no projected schema, we'll need to infer from first row
-                    // This is a limitation of the new format
-                    vec![]
-                };
-
-                // Convert Vec<Value> rows to Value array format expected by rows_to_arrow
-                let json_rows: Vec<serde_json::Value> = data_rows
-                    .iter()
-                    .map(|row| serde_json::Value::Array(row.clone()))
-                    .collect();
-
-                // Convert data in chunks
                 let chunk_size = 4_000;
-                for chunk in json_rows.chunks(chunk_size) {
-                    let rec = rows_to_arrow(chunk, &columns, &projected_schema)
+                for chunk in data_rows.chunks(chunk_size) {
+                    let rec = rows_to_arrow(chunk, &columns)
                         .map_err(|e| Error::ConversionError { source: e })?;
                     yield Ok::<_, Error>(rec);
                 }
@@ -199,7 +180,6 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         });
 
         let Some(first_chunk) = stream.next().await else {
-            println!("No data found");
             return Ok(Box::pin(RecordBatchStreamAdapter::new(
                 Arc::new(Schema::empty()),
                 stream::empty(),
@@ -229,35 +209,11 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
     }
 }
 
-fn arrow_type_to_trino_type_string(data_type: &DataType) -> String {
-    match data_type {
-        DataType::Boolean => "boolean".to_string(),
-        DataType::Int8 => "tinyint".to_string(),
-        DataType::Int16 => "smallint".to_string(),
-        DataType::Int32 => "integer".to_string(),
-        DataType::Int64 => "bigint".to_string(),
-        DataType::Float32 => "real".to_string(),
-        DataType::Float64 => "double".to_string(),
-        DataType::Utf8 => "varchar".to_string(),
-        DataType::LargeUtf8 => "varchar".to_string(),
-        DataType::Binary => "varbinary".to_string(),
-        DataType::Date32 => "date".to_string(),
-        DataType::Time64(TimeUnit::Nanosecond) => "time".to_string(),
-        DataType::Timestamp(TimeUnit::Microsecond, None) => "timestamp".to_string(),
-        DataType::Timestamp(TimeUnit::Microsecond, Some(_)) => "timestamp with time zone".to_string(),
-        DataType::Decimal128(precision, scale) => format!("decimal({},{})", precision, scale),
-        DataType::Decimal256(precision, scale) => format!("decimal({},{})", precision, scale),
-        _ => "varchar".to_string(), // fallback
-    }
-}
-
 impl TrinoConnection {
     pub fn new_with_config(
         client: Arc<reqwest::Client>,
         base_url: String,
-        // password: Option<String>,
     ) -> Result<Self, Error> {
-        // Validate URL
         if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
             return Err(Error::InvalidUrl { url: base_url });
         }
@@ -275,7 +231,9 @@ impl TrinoConnection {
         self
     }
 
-    async fn execute_query(&self, sql: &str) -> Result<Vec<Vec<Value>>, Error> {
+    async fn execute_query(&self, sql: &str) -> Result<TrinoQueryResult, Error> {
+        println!("Executing query: {}", sql);
+        
         let url = format!("{}/v1/statement", self.base_url);
 
         // Step 1: Submit the query
@@ -302,20 +260,44 @@ impl TrinoConnection {
 
         let mut result: Value = response.json().await.context(QuerySnafu)?;
         let mut all_data: Vec<Vec<Value>> = Vec::new();
+        let mut columns: Vec<TrinoColumn> = Vec::new();
 
         loop {
+            // Extract column information
+            if columns.is_empty() {
+                if let Some(cols) = result.get("columns").and_then(|c| c.as_array()) {
+                    for col in cols {
+                        if let Some(col_obj) = col.as_object() {
+                            let name = col_obj
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+
+                            let type_name = col_obj
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("varchar")
+                                .to_string();
+
+                            columns.push(TrinoColumn { name, type_name });
+                        }
+                    }
+                }
+            }
+
+            let state = result["stats"]["state"].as_str().unwrap_or("");
+            println!("State: {}, next uri: {}", state, result.get("nextUri").and_then(|v| v.as_str()).unwrap_or(""));
+
+            // Extract data rows
             if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
-                // println!("Data found");
+                println!("data detected");
                 for row in data {
                     if let Some(row_array) = row.as_array() {
                         all_data.push(row_array.clone());
                     }
                 }
             }
-
-            let state = result["stats"]["state"].as_str().unwrap_or("");
-
-            println!("State: {}, next uri: {}", state, result.get("nextUri").and_then(|v| v.as_str()).unwrap_or(""));
 
             // Check if query is finished
             if state == "FINISHED" {
@@ -363,6 +345,9 @@ impl TrinoConnection {
             }
         }
 
-        Ok(all_data)
+        Ok(TrinoQueryResult {
+            data: all_data,
+            columns,
+        })
     }
 }

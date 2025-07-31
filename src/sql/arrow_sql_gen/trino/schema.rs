@@ -57,7 +57,7 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Maps Trino data types to Arrow data types
-pub fn data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
+pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
     let normalized_type = trino_type.to_lowercase();
 
     match normalized_type.as_str() {
@@ -95,7 +95,7 @@ pub fn data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
     }
 }
 
-fn parse_decimal_type(type_str: &str) -> Result<DataType> {
+pub fn parse_decimal_type(type_str: &str) -> Result<DataType> {
     // Parse "decimal(precision,scale)" or "decimal(precision)" or just "decimal"
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.find(')') {
@@ -127,7 +127,7 @@ fn parse_array_type(type_str: &str) -> Result<DataType> {
     if let Some(start) = type_str.find('(') {
         if let Some(end) = type_str.rfind(')') {
             let element_type_str = &type_str[start + 1..end];
-            let element_type = data_type_to_arrow_type(element_type_str)?;
+            let element_type = trino_data_type_to_arrow_type(element_type_str)?;
             return Ok(DataType::List(Arc::new(Field::new("item", element_type, true))));
         }
     }
@@ -146,8 +146,8 @@ fn parse_map_type(type_str: &str) -> Result<DataType> {
                 let key_type_str = inner[..comma_pos].trim();
                 let value_type_str = inner[comma_pos + 1..].trim();
 
-                let key_type = data_type_to_arrow_type(key_type_str)?;
-                let value_type = data_type_to_arrow_type(value_type_str)?;
+                let key_type = trino_data_type_to_arrow_type(key_type_str)?;
+                let value_type = trino_data_type_to_arrow_type(value_type_str)?;
 
                 return Ok(DataType::Map(
                     Arc::new(Field::new("entries", DataType::Struct(Fields::from(vec![
@@ -177,7 +177,7 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
                 if parts.len() >= 2 {
                     let field_name = parts[0];
                     let field_type = parts[1..].join(" ");
-                    let arrow_type = data_type_to_arrow_type(&field_type)?;
+                    let arrow_type = trino_data_type_to_arrow_type(&field_type)?;
                     fields.push(Field::new(field_name, arrow_type, true));
                 }
             }

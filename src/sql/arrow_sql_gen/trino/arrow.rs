@@ -16,6 +16,13 @@ use serde_json::Value;
 use snafu::{ResultExt, Snafu};
 use std::{collections::HashMap, convert, sync::Arc};
 
+
+#[derive(Debug, Clone)]
+pub struct TrinoColumn {
+    pub name: String,
+    pub type_name: String,
+}
+
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Failed to build record batch: {source}"))]
@@ -68,8 +75,7 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Maps Trino data types to Arrow data types
-pub fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
+fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
     let normalized_type = trino_type.to_lowercase();
 
     match normalized_type.as_str() {
@@ -202,16 +208,14 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
     })
 }
 
-/// Converts Trino query result rows to an Arrow RecordBatch
 pub fn rows_to_arrow(
-    rows: &[Value],
-    columns: &[Value],
-    projected_schema: &Option<SchemaRef>,
+    rows: &[Vec<Value>],
+    columns: &Vec<TrinoColumn>,
 ) -> Result<RecordBatch> {
     if rows.is_empty() {
         // Return empty batch with correct schema if we have columns info
         if !columns.is_empty() {
-            let schema = build_schema_from_columns(columns)?;
+            let schema = build_schema_from_columns(&columns)?;
             let empty_arrays: Vec<ArrayRef> = schema
                 .fields()
                 .iter()
@@ -224,7 +228,7 @@ pub fn rows_to_arrow(
         return Ok(RecordBatch::new_empty(Arc::new(Schema::empty())));
     }
 
-    let schema = build_schema_from_columns(columns)?;
+    let schema = build_schema_from_columns(&columns)?;
     let mut builders = create_builders(&schema, rows.len())?;
 
     for row in rows {
@@ -236,24 +240,12 @@ pub fn rows_to_arrow(
     RecordBatch::try_new(Arc::new(schema), arrays).context(FailedToBuildRecordBatchSnafu)
 }
 
-fn build_schema_from_columns(columns: &[Value]) -> Result<Schema> {
+fn build_schema_from_columns(columns: &[TrinoColumn]) -> Result<Schema> {
     let mut fields = Vec::new();
 
     for column in columns {
-        if let Some(obj) = column.as_object() {
-            let column_name = obj
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-
-            let column_type = obj
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("varchar");
-
-            let arrow_type = trino_data_type_to_arrow_type(column_type)?;
-            fields.push(Field::new(column_name, arrow_type, true));
-        }
+        let arrow_type = trino_data_type_to_arrow_type(&column.type_name)?;
+        fields.push(Field::new(&column.name, arrow_type, true));
     }
 
     Ok(Schema::new(fields))
@@ -334,18 +326,16 @@ fn create_builders(schema: &Schema, capacity: usize) -> Result<BuilderMap> {
 }
 
 fn append_row_to_builders(
-    row: &Value,
+    row: &Vec<Value>,
     schema: &Schema,
     builders: &mut BuilderMap,
 ) -> Result<()> {
-    if let Some(row_array) = row.as_array() {
-        for (field_idx, field) in schema.fields().iter().enumerate() {
-            let field_name = field.name();
-            let value = row_array.get(field_idx);
+    for (field_idx, field) in schema.fields().iter().enumerate() {
+        let field_name = field.name();
+        let value = row.get(field_idx);
 
-            if let Some(builder) = builders.get_mut(field_name) {
-                builder.append_value(value)?;
-            }
+        if let Some(builder) = builders.get_mut(field_name) {
+            builder.append_value(value)?;
         }
     }
     Ok(())
