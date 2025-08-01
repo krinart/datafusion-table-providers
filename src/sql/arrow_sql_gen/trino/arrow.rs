@@ -166,20 +166,8 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             Ok(Box::new(StructBuilder::new(fields.clone(), field_builders)))
         }
         DataType::Map(field, _) => {
-            if let DataType::Struct(struct_fields) = field.data_type() {
-                if struct_fields.len() == 2 {
-                    let key_builder = create_arrow_builder_for_field(&struct_fields[0], capacity)?;
-                    let value_builder =
-                        create_arrow_builder_for_field(&struct_fields[1], capacity)?;
-                    Ok(Box::new(MapBuilder::new(None, key_builder, value_builder)))
-                } else {
-                    // Fallback to string for invalid map structure
-                    Ok(Box::new(StringBuilder::with_capacity(capacity, 1024)))
-                }
-            } else {
-                // Fallback to string for invalid map structure
-                Ok(Box::new(StringBuilder::with_capacity(capacity, 1024)))
-            }
+            // Fallback to string for invalid map structure
+            Ok(Box::new(StringBuilder::with_capacity(capacity, 1024)))
         }
         DataType::Null => Ok(Box::new(NullBuilder::new())),
         _ => {
@@ -1337,18 +1325,6 @@ fn append_to_struct_field_builder(
                 })?;
             append_decimal256_value(field_builder, value)?;
         }
-        // DataType::List(_) => {
-        //     // For lists in structs, we need to handle this differently
-        //     // Get the list builder and call append_list_value on it
-        //     let field_builders = builder.field_builders();
-        //     if let Some(list_builder) = field_builders.get_mut(field_index) {
-        //         append_list_value(list_builder.as_mut(), value)?;
-        //     } else {
-        //         return Err(Error::BuilderDowncastError {
-        //             expected: format!("ListBuilder at index {}", field_index),
-        //         });
-        //     }
-        // }
         DataType::Struct(nested_fields) => {
             let nested_struct_builder = builder
                 .field_builder::<StructBuilder>(field_index)
@@ -1357,17 +1333,6 @@ fn append_to_struct_field_builder(
                 })?;
             append_struct_value(nested_struct_builder, value, nested_fields)?;
         }
-        // DataType::Map(_, _) => {
-        //     // For maps in structs, similar approach
-        //     let field_builders = builder.field_builders();
-        //     if let Some(map_builder) = field_builders.get_mut(field_index) {
-        //         append_map_value(map_builder.as_mut(), value)?;
-        //     } else {
-        //         return Err(Error::BuilderDowncastError {
-        //             expected: format!("MapBuilder at index {}", field_index),
-        //         });
-        //     }
-        // }
         DataType::Null => {
             let field_builder = builder
                 .field_builder::<NullBuilder>(field_index)
@@ -1396,14 +1361,12 @@ fn append_struct_value(
 ) -> Result<()> {
     match value {
         Some(v) if v.is_null() => {
-            // Append null to each field
             for (i, field) in fields.iter().enumerate() {
                 append_to_struct_field_builder(builder, i, None, field.data_type())?;
             }
             builder.append_null();
         }
         Some(Value::Object(obj)) => {
-            // Append values by field name
             for (i, field) in fields.iter().enumerate() {
                 let field_value = obj.get(field.name());
                 append_to_struct_field_builder(builder, i, field_value, field.data_type())?;
@@ -1411,7 +1374,6 @@ fn append_struct_value(
             builder.append(true);
         }
         Some(Value::Array(arr)) => {
-            // Append values by position
             for (i, field) in fields.iter().enumerate() {
                 let field_value = arr.get(i);
                 append_to_struct_field_builder(builder, i, field_value, field.data_type())?;
@@ -1419,14 +1381,12 @@ fn append_struct_value(
             builder.append(true);
         }
         Some(_) => {
-            // Invalid struct format, append nulls to all fields
             for (i, field) in fields.iter().enumerate() {
                 append_to_struct_field_builder(builder, i, None, field.data_type())?;
             }
             builder.append_null();
         }
         None => {
-            // Append null to each field
             for (i, field) in fields.iter().enumerate() {
                 append_to_struct_field_builder(builder, i, None, field.data_type())?;
             }
@@ -1699,6 +1659,132 @@ mod tests {
         }
     }
 
+    fn decimal_to_scaled_int128(decimal_str: &str, scale: u8) -> i128 {
+        let decimal = decimal_str.parse::<BigDecimal>().unwrap();
+        let scale_factor = 10_i128.pow(scale as u32);
+        (decimal * bigdecimal::BigDecimal::from(scale_factor))
+            .to_i128()
+            .unwrap()
+    }
+
+    fn decimal_to_scaled_int256(decimal_str: &str, scale: u8) -> i256 {
+        let decimal = decimal_str.parse::<BigDecimal>().unwrap();
+        let scale_factor = bigdecimal::BigDecimal::from(10_i128.pow(scale as u32));
+        let scaled_decimal = decimal * scale_factor;
+
+        // Convert BigDecimal to i256 (this is what your to_decimal_256 function does)
+        let (bigint_value, _) = scaled_decimal.as_bigint_and_exponent();
+        let mut bigint_bytes = bigint_value.to_signed_bytes_le();
+
+        let is_negative = bigint_value.sign() == num_bigint::Sign::Minus;
+        let fill_byte = if is_negative { 0xFF } else { 0x00 };
+
+        if bigint_bytes.len() > 32 {
+            bigint_bytes.truncate(32);
+        } else {
+            bigint_bytes.resize(32, fill_byte);
+        };
+
+        let mut array = [0u8; 32];
+        array.copy_from_slice(&bigint_bytes);
+        i256::from_le_bytes(array)
+    }
+
+    fn assert_binary_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<&[u8]>,
+    ) {
+        let column = record_batch.column(column_index);
+
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+        }
+    }
+
+    fn assert_list_of_strings_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<Option<Vec<&str>>>,
+    ) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+
+        for (i, expected_value) in expected.iter().enumerate() {
+            match expected_value {
+                Some(expected_list) => {
+                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
+                    let list_array = array.value(i);
+                    let string_array = list_array
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap();
+
+                    assert_eq!(string_array.len(), expected_list.len(),
+                               "List length mismatch at index {}", i);
+
+                    for (j, expected_item) in expected_list.iter().enumerate() {
+                        assert_eq!(string_array.value(j), *expected_item,
+                                   "Mismatch at index {} item {}", i, j);
+                    }
+                }
+                None => {
+                    assert!(array.is_null(i), "Expected null at index {}", i);
+                }
+            }
+        }
+    }
+
+    fn assert_list_of_integers_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<Option<Vec<i32>>>,
+    ) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+
+        for (i, expected_value) in expected.iter().enumerate() {
+            match expected_value {
+                Some(expected_list) => {
+                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
+                    let list_array = array.value(i);
+                    let string_array = list_array
+                        .as_any()
+                        .downcast_ref::<Int32Array>()
+                        .unwrap();
+
+                    assert_eq!(string_array.len(), expected_list.len(),
+                               "List length mismatch at index {}", i);
+
+                    for (j, expected_item) in expected_list.iter().enumerate() {
+                        assert_eq!(string_array.value(j), *expected_item,
+                                   "Mismatch at index {} item {}", i, j);
+                    }
+                }
+                None => {
+                    assert!(array.is_null(i), "Expected null at index {}", i);
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_empty_rows_empty_columns() {
         let rows: Vec<Vec<Value>> = vec![];
@@ -1887,44 +1973,9 @@ mod tests {
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 2);
 
-        // Helper function to convert decimal string to scaled integer
-        fn decimal_to_scaled_int128(decimal_str: &str, scale: u8) -> i128 {
-            let decimal = decimal_str.parse::<bigdecimal::BigDecimal>().unwrap();
-            let scale_factor = 10_i128.pow(scale as u32);
-            (decimal * bigdecimal::BigDecimal::from(scale_factor))
-                .to_i128()
-                .unwrap()
-        }
-
-        fn decimal_to_scaled_int256(decimal_str: &str, scale: u8) -> arrow::datatypes::i256 {
-            let decimal = decimal_str.parse::<bigdecimal::BigDecimal>().unwrap();
-            let scale_factor = bigdecimal::BigDecimal::from(10_i128.pow(scale as u32));
-            let scaled_decimal = decimal * scale_factor;
-
-            // Convert BigDecimal to i256 (this is what your to_decimal_256 function does)
-            let (bigint_value, _) = scaled_decimal.as_bigint_and_exponent();
-            let mut bigint_bytes = bigint_value.to_signed_bytes_le();
-
-            let is_negative = bigint_value.sign() == num_bigint::Sign::Minus;
-            let fill_byte = if is_negative { 0xFF } else { 0x00 };
-
-            if bigint_bytes.len() > 32 {
-                bigint_bytes.truncate(32);
-            } else {
-                bigint_bytes.resize(32, fill_byte);
-            };
-
-            let mut array = [0u8; 32];
-            array.copy_from_slice(&bigint_bytes);
-            arrow::datatypes::i256::from_le_bytes(array)
-        }
-
-        // Calculate expected values
-        // decimal(10,2) means scale=2, so 123.45 becomes 12345
         let decimal128_1 = decimal_to_scaled_int128("123.45", 2);
         let decimal128_2 = decimal_to_scaled_int128("0.00", 2);
 
-        // decimal(42,4) means scale=4, so 999999999999.9999 becomes 9999999999999999
         let decimal256_1 = decimal_to_scaled_int256("999999999999.9999", 4);
         let decimal256_2 = decimal_to_scaled_int256("0.0000", 4);
 
@@ -1951,17 +2002,11 @@ mod tests {
         let result = rows_to_arrow(&rows, &columns).unwrap();
         assert_eq!(result.num_rows(), 2);
 
-        let binary_array = result
-            .column(0)
-            .as_any()
-            .downcast_ref::<BinaryArray>()
-            .unwrap();
-        assert!(!binary_array.is_null(0));
-        assert!(!binary_array.is_null(1));
+        assert_binary_array(&result, 0, vec![b"hello world", b"plain text"]);
     }
 
     #[test]
-    fn test_list_type() {
+    fn test_list_of_strings() {
         let columns = create_test_columns(vec![("list_col", "array(varchar)")]);
 
         let rows = vec![
@@ -1972,7 +2017,137 @@ mod tests {
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
         assert_eq!(result.num_rows(), 3);
+
+        assert_list_of_strings_array(
+            &result,
+            0,
+            vec![
+                Some(vec!["item1", "item2", "item3"]),
+                Some(vec!["single"]),
+                None,
+            ],
+        );
     }
+
+    #[test]
+    fn test_list_of_integers() {
+        let columns = create_test_columns(vec![("list_col", "array(integer)")]);
+
+        let rows = vec![
+            vec![json!([100, 200, 300])],
+            vec![json!([-10000000])],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+
+        assert_list_of_integers_array(
+            &result,
+            0,
+            vec![
+                Some(vec![100, 200, 300]),
+                Some(vec![-10000000]),
+                None,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_list_of_lists() {
+        let columns = create_test_columns(vec![("list_col", "array(array(integer))")]);
+
+        let rows = vec![
+            vec![json!([[1, 2, 3], [4, 5], [6]])],
+            vec![json!([[10, 20]])],
+            vec![json!([])],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 4);
+
+        assert_list_of_strings_array(
+            &result,
+            0,
+            vec![
+                Some(vec![
+                    "[1,2,3]",
+                    "[4,5]",
+                    "[6]",
+                ]),
+                Some(vec![
+                    "[10,20]",
+                ]),
+                Some(vec![]),
+                None,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_list_of_maps() {
+        let columns = create_test_columns(vec![("list_col", "array(map(string, integer))")]);
+
+        let rows = vec![
+            vec![json!([{"key1": 1, "key2": 2}, {"key3": 3}])],
+            vec![json!([{"single_key": 42}])],
+            vec![json!([])],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 4);
+
+        assert_list_of_strings_array(
+            &result,
+            0,
+            vec![
+                Some(vec![
+                    r#"{"key1":1,"key2":2}"#,
+                    r#"{"key3":3}"#,
+                ]),
+                Some(vec![
+                    r#"{"single_key":42}"#,
+                ]),
+                Some(vec![]),
+                None,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_list_of_structs() {
+        let columns = create_test_columns(vec![("list_col", "array(row(name varchar, age integer))")]);
+
+        let rows = vec![
+            vec![json!([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])],
+            vec![json!([{"name": "Charlie", "age": 35}])],
+            vec![json!([])], // empty list
+            vec![Value::Null], // null list
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 4);
+
+        // Since structs are represented as strings, we expect a list of JSON string representations
+        assert_list_of_strings_array(
+            &result,
+            0,
+            vec![
+                Some(vec![
+                    r#"{"age":30,"name":"Alice"}"#,
+                    r#"{"age":25,"name":"Bob"}"#,
+                ]),
+                Some(vec![
+                    r#"{"age":35,"name":"Charlie"}"#,
+                ]),
+                Some(vec![]), // empty list
+                None, // null list
+            ],
+        );
+    }
+
 
     #[test]
     fn test_struct_type() {
