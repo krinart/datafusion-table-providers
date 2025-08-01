@@ -104,7 +104,6 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         &self,
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
-        println!("get_schema: {:?}", table_reference);
         let sql = format!("DESCRIBE {table_reference}");
 
         let query_result =

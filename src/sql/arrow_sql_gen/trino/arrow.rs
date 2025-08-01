@@ -29,8 +29,6 @@ pub struct TrinoColumn {
 }
 
 pub fn rows_to_arrow(rows: &[Vec<Value>], schema: &Option<SchemaRef>) -> Result<RecordBatch> {
-    println!("rows_to_arrow: {:?}", rows);
-
     let schema_ref = match schema {
         Some(s) => s,
         None => {
