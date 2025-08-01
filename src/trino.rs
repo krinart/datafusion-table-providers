@@ -56,27 +56,4 @@ impl TrinoTableFactory {
 
         Ok(table_provider)
     }
-
-    /// Get connection pool information
-    ///
-    /// Returns the base URL of the Trino coordinator since Trino doesn't have
-    /// traditional connection pool metrics like MySQL
-    pub fn coordinator_url(&self) -> &str {
-        self.pool.base_url()
-    }
-
-    /// Get the default catalog being used
-    pub fn catalog(&self) -> &str {
-        self.pool.catalog()
-    }
-
-    /// Get the default schema being used
-    pub fn schema(&self) -> &str {
-        self.pool.schema()
-    }
-
-    /// Get the user (if configured)
-    pub fn user(&self) -> Option<&str> {
-        self.pool.user()
-    }
 }

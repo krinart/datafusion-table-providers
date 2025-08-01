@@ -66,7 +66,7 @@ itertools = "0.13.0"
 dyn-clone = { version = "1.0.17", optional = true }
 geo-types = "0.7.13"
 fundu = "2.0.1"
-reqwest = { version = "0.12.5", optional = true, features = ["json"] }
+reqwest = { version = "0.12.5", optional = true, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 anyhow = "1.0.86"

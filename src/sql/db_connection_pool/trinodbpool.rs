@@ -1,13 +1,12 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use reqwest::header::{HeaderValue, AUTHORIZATION};
-use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use reqwest::{Client, Identity};
 use secrecy::{ExposeSecret, SecretBox, SecretString};
 use serde_json::Value;
 use snafu::{ResultExt, Snafu};
+use std::{collections::HashMap, fs, sync::Arc, time::Duration};
 // use tokio_postgres::types::ToSql;
 
 use crate::{
@@ -55,6 +54,21 @@ pub enum Error {
 
     #[snafu(display("Trino server error: {status_code} - {message}"))]
     TrinoServerError { status_code: u16, message: String },
+
+    #[snafu(display("Invalid Trino authentication configuration: {details}"))]
+    InvalidAuthConfig { details: String },
+
+    #[snafu(display("Failed to read identity PEM file at '{}': {}", path, source))]
+    UnableToReadIdentityPem {
+        path: String,
+        source: std::io::Error,
+    },
+
+    #[snafu(display("Invalid identity PEM at '{}': {}", path, source))]
+    InvalidIdentityPem {
+        path: String,
+        source: reqwest::Error,
+    },
 }
 
 #[derive(Clone)]
@@ -103,114 +117,38 @@ impl TrinoConnectionPool {
     pub async fn new(params: HashMap<String, SecretString>) -> Result<Self> {
         let params = util::remove_prefix_from_hashmap_keys(params, "trino_");
 
-        let base_url = if let Some(url) = params.get("url").map(SecretBox::expose_secret) {
-            if !url.starts_with("http://") && !url.starts_with("https://") {
-                return Err(Error::InvalidTrinoUrl {
-                    url: url.to_string(),
-                });
-            }
-            url.trim_end_matches('/').to_string()
-        } else {
-            let host = params
-                .get("host")
-                .map(SecretBox::expose_secret)
-                .ok_or_else(|| Error::MissingRequiredParameter {
-                    parameter_name: "url or host".to_string(),
-                })?;
+        let base_url = build_base_url(&params)?;
+        let (catalog, schema) = get_catalog_and_schema(&params)?;
+        let (user, password) = get_user_and_password(&params);
 
-            let port = params
-                .get("port")
-                .map(SecretBox::expose_secret)
-                .unwrap_or("8080")
-                .parse::<u16>()
-                .context(InvalidIntegerParameterSnafu {
-                    parameter_name: "port",
-                })?;
+        validate_auth_exclusivity(&params, &user, &password)?;
 
-            verify_ns_lookup_and_tcp_connect(host, port)
-                .await
-                .context(InvalidHostOrPortSnafu { host, port })?;
+        let headers = build_headers(&catalog, &schema, &user, &password)?;
 
-            let protocol = if params
-                .get("ssl")
-                .map(SecretBox::expose_secret)
-                .unwrap_or("false")
-                .parse::<bool>()
-                .unwrap_or(false)
-            {
-                "https"
-            } else {
-                "http"
-            };
-
-            format!("{}://{}:{}", protocol, host, port)
-        };
-
-        // Required parameters
-        let catalog = params
-            .get("catalog")
-            .map(SecretBox::expose_secret)
-            .ok_or_else(|| Error::MissingRequiredParameter {
-                parameter_name: "catalog".to_string(),
-            })?
-            .to_string();
-
-        let schema = params
-            .get("schema")
-            .map(SecretBox::expose_secret)
-            .unwrap_or("default")
-            .to_string();
-
-        // Optional parameters
-        let user = params.get("user").map(|u| u.expose_secret().to_string());
-        let password = params.get("password").cloned();
-
-        let timeout_seconds = params
-            .get("timeout")
-            .map(SecretBox::expose_secret)
-            .unwrap_or("300")
-            .parse::<u64>()
-            .context(InvalidIntegerParameterSnafu {
-                parameter_name: "timeout",
-            })?;
-
-        let ssl_verification = params
-            .get("ssl_verification")
-            .map(SecretBox::expose_secret)
-            .unwrap_or("true")
-            .parse::<bool>()
-            .unwrap_or(true);
-
-        // Build HTTP client
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("X-Trino-Catalog", catalog.parse().unwrap());
-        headers.insert("X-Trino-Schema", schema.parse().unwrap());
-
-        if let Some(ref user) = user {
-            headers.insert("X-Trino-User", user.parse().unwrap());
-        }
-
-        // Add basic auth if password is provided
-        if let (Some(ref user), Some(ref password)) = (&user, &password) {
-            let credentials = format!("{}:{}", user, password.expose_secret());
-            let encoded = BASE64.encode(credentials);
-
-            headers.insert(
-                AUTHORIZATION,
-                HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
-            );
-        }
+        let timeout_seconds = parse_u64_param(&params, "timeout", 300)?;
+        let ssl_verification = parse_bool_param(&params, "ssl_verification", true)?;
 
         let mut client_builder = Client::builder()
             .default_headers(headers)
             .timeout(Duration::from_secs(timeout_seconds))
             .danger_accept_invalid_certs(!ssl_verification);
 
+        if let Some(identity_path) = params.get("identity_pem_path") {
+            let pem =
+                fs::read(identity_path.expose_secret()).context(UnableToReadIdentityPemSnafu {
+                    path: identity_path.expose_secret().to_string(),
+                })?;
+
+            let identity = Identity::from_pem(&pem).context(InvalidIdentityPemSnafu {
+                path: identity_path.expose_secret().to_string(),
+            })?;
+            client_builder = client_builder.identity(identity);
+        }
+
         let client = client_builder
             .build()
             .context(FailedToBuildTrinoHttpClientSnafu)?;
 
-        // Test the connection
         Self::test_connection(&client, &base_url).await?;
 
         let join_push_down = Self::get_join_context(&base_url, &catalog, &schema, &user);
@@ -232,21 +170,6 @@ impl TrinoConnectionPool {
     pub fn with_unsupported_type_action(mut self, action: UnsupportedTypeAction) -> Self {
         self.unsupported_type_action = action;
         self
-    }
-
-    /// Returns a direct connection to the underlying Trino cluster.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if there is a problem creating the connection.
-    pub async fn connect_direct(&self) -> super::Result<TrinoConnection> {
-        let mut connection =
-            TrinoConnection::new_with_config(self.client.clone(), self.base_url.clone())
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
-        connection = connection.with_unsupported_type_action(self.unsupported_type_action);
-
-        Ok(connection)
     }
 
     async fn test_connection(client: &Client, base_url: &str) -> Result<()> {
@@ -285,40 +208,160 @@ impl TrinoConnectionPool {
 
         JoinPushDown::AllowedFor(join_context)
     }
-
-    /// Get the base URL for the Trino coordinator
-    #[must_use]
-    pub fn base_url(&self) -> &str {
-        &self.base_url
-    }
-
-    /// Get the default catalog
-    #[must_use]
-    pub fn catalog(&self) -> &str {
-        &self.catalog
-    }
-
-    /// Get the default schema
-    #[must_use]
-    pub fn schema(&self) -> &str {
-        &self.schema
-    }
-
-    /// Get the user (if configured)
-    #[must_use]
-    pub fn user(&self) -> Option<&str> {
-        self.user.as_deref()
-    }
 }
 
 #[async_trait]
 impl DbConnectionPool<Arc<Client>, &'static str> for TrinoConnectionPool {
     async fn connect(&self) -> super::Result<Box<dyn DbConnection<Arc<Client>, &'static str>>> {
-        let connection = self.connect_direct().await?;
+        let mut connection =
+            TrinoConnection::new_with_config(self.client.clone(), self.base_url.clone())
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+        connection = connection.with_unsupported_type_action(self.unsupported_type_action);
+
         Ok(Box::new(connection))
     }
 
     fn join_push_down(&self) -> JoinPushDown {
         self.join_push_down.clone()
     }
+}
+
+fn build_base_url(params: &HashMap<String, SecretString>) -> Result<String> {
+    if let Some(url) = params.get("url").map(ExposeSecret::expose_secret) {
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(Error::InvalidTrinoUrl {
+                url: url.to_string(),
+            });
+        }
+        Ok(url.trim_end_matches('/').to_string())
+    } else {
+        let host = params
+            .get("host")
+            .map(ExposeSecret::expose_secret)
+            .ok_or_else(|| Error::MissingRequiredParameter {
+                parameter_name: "url or host".to_string(),
+            })?;
+
+        let port = parse_u16_param(params, "port", 8080)?;
+        futures::executor::block_on(verify_ns_lookup_and_tcp_connect(host, port))
+            .context(InvalidHostOrPortSnafu { host, port })?;
+
+        let protocol = if parse_bool_param(params, "ssl", false)? {
+            "https"
+        } else {
+            "http"
+        };
+
+        Ok(format!("{}://{}:{}", protocol, host, port))
+    }
+}
+
+fn get_catalog_and_schema(params: &HashMap<String, SecretString>) -> Result<(String, String)> {
+    let catalog = params
+        .get("catalog")
+        .map(ExposeSecret::expose_secret)
+        .ok_or_else(|| Error::MissingRequiredParameter {
+            parameter_name: "catalog".to_string(),
+        })?
+        .to_string();
+
+    let schema = params
+        .get("schema")
+        .map(ExposeSecret::expose_secret)
+        .unwrap_or("default")
+        .to_string();
+
+    Ok((catalog, schema))
+}
+
+fn get_user_and_password(
+    params: &HashMap<String, SecretString>,
+) -> (Option<String>, Option<SecretString>) {
+    let user = params.get("user").map(|u| u.expose_secret().to_string());
+    let password = params.get("password").cloned();
+    (user, password)
+}
+
+fn validate_auth_exclusivity(
+    params: &HashMap<String, SecretString>,
+    user: &Option<String>,
+    password: &Option<SecretString>,
+) -> Result<()> {
+    let has_user_pass = user.is_some() || password.is_some();
+    let has_identity = params.contains_key("identity_pem_path");
+    let has_token = params.contains_key("bearer_token");
+
+    let auth_count = [has_user_pass, has_identity, has_token]
+        .into_iter()
+        .filter(|x| *x)
+        .count();
+
+    if auth_count != 1 {
+        return Err(Error::InvalidAuthConfig {
+            details: "Exactly one authentication method must be provided: basic auth, mTLS, or bearer token".into(),
+        });
+    }
+    Ok(())
+}
+
+fn build_headers(
+    catalog: &str,
+    schema: &str,
+    user: &Option<String>,
+    password: &Option<SecretString>,
+) -> Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    headers.insert("X-Trino-Catalog", catalog.parse().unwrap());
+    headers.insert("X-Trino-Schema", schema.parse().unwrap());
+
+    if let Some(user) = user {
+        headers.insert("X-Trino-User", user.parse().unwrap());
+    }
+
+    if let (Some(user), Some(password)) = (user, password) {
+        let credentials = format!("{}:{}", user, password.expose_secret());
+        let encoded = BASE64.encode(credentials);
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
+        );
+    }
+
+    Ok(headers)
+}
+
+fn parse_u64_param(params: &HashMap<String, SecretString>, key: &str, default: u64) -> Result<u64> {
+    params
+        .get(key)
+        .map(ExposeSecret::expose_secret)
+        .unwrap_or(&default.to_string())
+        .parse::<u64>()
+        .context(InvalidIntegerParameterSnafu {
+            parameter_name: key,
+        })
+}
+
+fn parse_u16_param(params: &HashMap<String, SecretString>, key: &str, default: u16) -> Result<u16> {
+    params
+        .get(key)
+        .map(ExposeSecret::expose_secret)
+        .unwrap_or(&default.to_string())
+        .parse::<u16>()
+        .context(InvalidIntegerParameterSnafu {
+            parameter_name: key,
+        })
+}
+
+fn parse_bool_param(
+    params: &HashMap<String, SecretString>,
+    key: &str,
+    default: bool,
+) -> Result<bool> {
+    params
+        .get(key)
+        .map(ExposeSecret::expose_secret)
+        .unwrap_or(&default.to_string())
+        .parse::<bool>()
+        .or_else(|_| Ok(default))
 }
