@@ -323,9 +323,6 @@ fn create_list_builder_for_field(
     inner_field: &Field,
     capacity: usize,
 ) -> Result<Box<dyn ArrayBuilder>> {
-    // let values_builder = create_arrow_builder_for_field(inner_field, capacity);
-    // Ok(Box::new(ListBuilder::new(values_builder)))
-
     match inner_field.data_type() {
         DataType::Boolean => {
             let values_builder: Box<dyn ArrayBuilder> =
