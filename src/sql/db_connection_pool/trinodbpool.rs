@@ -15,7 +15,7 @@ use crate::{
     util::{self, ns_lookup::verify_ns_lookup_and_tcp_connect},
     UnsupportedTypeAction,
 };
-
+use crate::sql::db_connection_pool::dbconnection::trinoconn::DEFAULT_POLL_WAIT_TIME_MS;
 use super::DbConnectionPool;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -69,6 +69,8 @@ pub enum Error {
     },
 }
 
+const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+
 #[derive(Clone)]
 pub struct TrinoConnectionPool {
     base_url: String,
@@ -77,6 +79,7 @@ pub struct TrinoConnectionPool {
     client: Arc<Client>,
     join_push_down: JoinPushDown,
     unsupported_type_action: UnsupportedTypeAction,
+    poll_wait_time: Duration,
 }
 
 impl std::fmt::Debug for TrinoConnectionPool {
@@ -98,14 +101,16 @@ impl TrinoConnectionPool {
     ///
     /// * `params` - A map of parameters to create the connection pool.
     ///   * `url` or `host` + `port` - The Trino coordinator URL or host and port
+    ///   * `ssl - Whether to use HTTPS when connecting to the Trino coordinator (optional, default to true)
     ///   * `catalog` - The default catalog to use (required)
     ///   * `schema` - The default schema to use (optional, defaults to "default")
     ///   * `user` - The user to authenticate with (required)
     ///   * `password` - The password for authentication (optional)
-    ///   * `timeout` - Request timeout in seconds (optional, defaults to 300)
+    ///   * `timeout_ms` - Request timeout in ms (optional, defaults to 300)
     ///   * `ssl_verification` - Whether to verify SSL certificates (optional, defaults to true)
     ///   * `identity_pem_path` - Path to a PEM file containing both the client certificate and private key for mTLS authentication. (optional)
     ///   * `bearer_token` - Bearer token for authentication (optional)
+    ///   * `poll_wait_time_ms` - Waiting time in ms between polling trino results (optional, defaults to 50)
     ///
     /// # Errors
     ///
@@ -122,12 +127,13 @@ impl TrinoConnectionPool {
 
         let headers = build_headers(&catalog, &schema, &user, &password, &bearer_token)?;
 
-        let timeout_seconds = parse_u64_param(&params, "timeout", 300)?;
+        let timeout_ms = parse_u64_param(&params, "timeout_ms", DEFAULT_TIMEOUT_MS)?;
+        let poll_wait_time = parse_u64_param(&params, "poll_wait_time_ms", DEFAULT_POLL_WAIT_TIME_MS)?;
         let ssl_verification = parse_bool_param(&params, "ssl_verification", true)?;
 
         let mut client_builder = Client::builder()
             .default_headers(headers)
-            .timeout(Duration::from_secs(timeout_seconds))
+            .timeout(Duration::from_millis(timeout_ms))
             .danger_accept_invalid_certs(!ssl_verification);
 
         if let Some(identity_path) = params.get("identity_pem_path") {
@@ -157,6 +163,7 @@ impl TrinoConnectionPool {
             client: Arc::new(client),
             join_push_down,
             unsupported_type_action: UnsupportedTypeAction::default(),
+            poll_wait_time: Duration::from_millis(poll_wait_time),
         })
     }
 
@@ -207,11 +214,9 @@ impl TrinoConnectionPool {
 #[async_trait]
 impl DbConnectionPool<Arc<Client>, &'static str> for TrinoConnectionPool {
     async fn connect(&self) -> super::Result<Box<dyn DbConnection<Arc<Client>, &'static str>>> {
-        let mut connection =
-            TrinoConnection::new_with_config(self.client.clone(), self.base_url.clone())
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-
-        connection = connection.with_unsupported_type_action(self.unsupported_type_action);
+        let connection =
+            TrinoConnection::new_with_config(self.client.clone(), self.base_url.clone(), self.poll_wait_time)
+                .with_unsupported_type_action(self.unsupported_type_action);
 
         Ok(Box::new(connection))
     }
@@ -241,7 +246,7 @@ fn build_base_url(params: &HashMap<String, SecretString>) -> Result<String> {
         futures::executor::block_on(verify_ns_lookup_and_tcp_connect(host, port))
             .context(InvalidHostOrPortSnafu { host, port })?;
 
-        let protocol = if parse_bool_param(params, "ssl", false)? {
+        let protocol = if parse_bool_param(params, "ssl", true)? {
             "https"
         } else {
             "http"

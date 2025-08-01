@@ -55,10 +55,13 @@ pub enum Error {
     MissingFieldError { field: String },
 }
 
+pub const DEFAULT_POLL_WAIT_TIME_MS: u64 = 50;
+
 pub struct TrinoConnection {
     client: Arc<reqwest::Client>,
     base_url: String,
     unsupported_type_action: UnsupportedTypeAction,
+    poll_wait_time: Duration,
 }
 
 impl<'a> DbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
@@ -82,6 +85,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
             client,
             base_url: String::new(),
             unsupported_type_action: UnsupportedTypeAction::default(),
+            poll_wait_time: Duration::from_millis(DEFAULT_POLL_WAIT_TIME_MS),
         }
     }
 
@@ -202,12 +206,13 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 }
 
 impl TrinoConnection {
-    pub fn new_with_config(client: Arc<reqwest::Client>, base_url: String) -> Result<Self, Error> {
-        Ok(TrinoConnection {
+    pub fn new_with_config(client: Arc<reqwest::Client>, base_url: String, poll_wait_time: Duration) -> Self {
+        TrinoConnection {
             client,
             base_url,
             unsupported_type_action: UnsupportedTypeAction::default(),
-        })
+            poll_wait_time,
+        }
     }
 
     #[must_use]
@@ -294,7 +299,7 @@ impl TrinoConnection {
             }
 
             if let Some(next_uri) = result.get("nextUri").and_then(|u| u.as_str()) {
-                sleep(Duration::from_millis(50)).await;
+                sleep(self.poll_wait_time).await;
 
                 let response = self
                     .client
