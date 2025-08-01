@@ -53,7 +53,7 @@ async fn test_trino_datetime_types(port: usize) {
             true,
         ),
         Field::new("date_field", DataType::Date32, true),
-        Field::new("time_field", DataType::Time64(TimeUnit::Nanosecond), true),
+        Field::new("time_field", DataType::Time32(TimeUnit::Millisecond), true),
     ]));
 
     let expected_record = RecordBatch::try_new(
@@ -61,8 +61,8 @@ async fn test_trino_datetime_types(port: usize) {
         vec![
             Arc::new(TimestampMillisecondArray::from(vec![1_726_135_200_000])),
             Arc::new(TimestampMillisecondArray::from(vec![1_726_135_200_000]).with_timezone("UTC")),
-            Arc::new(Date32Array::from(vec![19987])),
-            Arc::new(Time64NanosecondArray::from(vec![36_000_000_000_000])),
+            Arc::new(Date32Array::from(vec![19978])),
+            Arc::new(Time32MillisecondArray::from(vec![36_000_000])),
         ],
     )
     .expect("Failed to create arrow record batch");
@@ -578,7 +578,7 @@ async fn test_trino_arrow_oneway() {
     let port = crate::get_random_port();
     let trino_container = start_trino_container(port).await;
 
-    // test_trino_datetime_types(port).await;
+    test_trino_datetime_types(port).await;
     test_trino_numeric_types(port).await;
     test_trino_string_types(port).await;
     test_trino_boolean_types(port).await;

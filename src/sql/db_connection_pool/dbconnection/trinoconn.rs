@@ -34,16 +34,23 @@ pub struct TrinoQueryResult {
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Query execution failed.\n{source}\nFor details, refer to the Trino documentation: https://trino.io/docs/"))]
-    QueryError { source: reqwest::Error },
+    QueryError {
+        source: reqwest::Error,
+    },
 
     #[snafu(display("Failed to convert query result to Arrow.\n{source}\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
-    ConversionError { source: trino::Error },
+    ConversionError {
+        source: trino::Error,
+    },
 
     #[snafu(display("Authentication failed."))]
     AuthenticationFailedError,
 
     #[snafu(display("Trino server error: {status_code} - {message}"))]
-    TrinoServerError { status_code: u16, message: String },
+    TrinoServerError {
+        status_code: u16,
+        message: String,
+    },
 
     #[snafu(display("Unsupported data type '{data_type}' for field '{column_name}'.\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
     UnsupportedDataTypeError {
@@ -52,7 +59,11 @@ pub enum Error {
     },
 
     #[snafu(display("Failed to find the field '{field}'.\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
-    MissingFieldError { field: String },
+    MissingFieldError {
+        field: String,
+    },
+
+    NoSchema,
 }
 
 pub const DEFAULT_POLL_WAIT_TIME_MS: u64 = 50;
@@ -93,6 +104,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         &self,
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
+        println!("get_schema: {:?}", table_reference);
         let sql = format!("DESCRIBE {table_reference}");
 
         let query_result =
@@ -154,7 +166,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         &self,
         sql: &str,
         _params: &[&'a str],
-        _projected_schema: Option<SchemaRef>,
+        projected_schema: Option<SchemaRef>,
     ) -> Result<SendableRecordBatchStream> {
         let query_result =
             self.execute_query(sql)
@@ -170,7 +182,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
             if !data_rows.is_empty() {
                 let chunk_size = 4_000;
                 for chunk in data_rows.chunks(chunk_size) {
-                    let rec = rows_to_arrow(chunk, &columns)
+                    let rec = rows_to_arrow(chunk, &projected_schema)
                         .map_err(|e| Error::ConversionError { source: e })?;
                     yield Ok::<_, Error>(rec);
                 }
