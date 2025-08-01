@@ -1200,7 +1200,6 @@ fn append_to_struct_field_builder(
     value: Option<&Value>,
     field_data_type: &DataType,
 ) -> Result<()> {
-
     println!("append_to_struct_field_builder: {:?}", field_data_type);
 
     match field_data_type {
@@ -1693,11 +1692,7 @@ mod tests {
         i256::from_le_bytes(array)
     }
 
-    fn assert_binary_array(
-        record_batch: &RecordBatch,
-        column_index: usize,
-        expected: Vec<&[u8]>,
-    ) {
+    fn assert_binary_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<&[u8]>) {
         let column = record_batch.column(column_index);
 
         let array = record_batch
@@ -1730,17 +1725,23 @@ mod tests {
                 Some(expected_list) => {
                     assert!(!array.is_null(i), "Expected non-null at index {}", i);
                     let list_array = array.value(i);
-                    let string_array = list_array
-                        .as_any()
-                        .downcast_ref::<StringArray>()
-                        .unwrap();
+                    let string_array = list_array.as_any().downcast_ref::<StringArray>().unwrap();
 
-                    assert_eq!(string_array.len(), expected_list.len(),
-                               "List length mismatch at index {}", i);
+                    assert_eq!(
+                        string_array.len(),
+                        expected_list.len(),
+                        "List length mismatch at index {}",
+                        i
+                    );
 
                     for (j, expected_item) in expected_list.iter().enumerate() {
-                        assert_eq!(string_array.value(j), *expected_item,
-                                   "Mismatch at index {} item {}", i, j);
+                        assert_eq!(
+                            string_array.value(j),
+                            *expected_item,
+                            "Mismatch at index {} item {}",
+                            i,
+                            j
+                        );
                     }
                 }
                 None => {
@@ -1768,17 +1769,23 @@ mod tests {
                 Some(expected_list) => {
                     assert!(!array.is_null(i), "Expected non-null at index {}", i);
                     let list_array = array.value(i);
-                    let string_array = list_array
-                        .as_any()
-                        .downcast_ref::<Int32Array>()
-                        .unwrap();
+                    let string_array = list_array.as_any().downcast_ref::<Int32Array>().unwrap();
 
-                    assert_eq!(string_array.len(), expected_list.len(),
-                               "List length mismatch at index {}", i);
+                    assert_eq!(
+                        string_array.len(),
+                        expected_list.len(),
+                        "List length mismatch at index {}",
+                        i
+                    );
 
                     for (j, expected_item) in expected_list.iter().enumerate() {
-                        assert_eq!(string_array.value(j), *expected_item,
-                                   "Mismatch at index {} item {}", i, j);
+                        assert_eq!(
+                            string_array.value(j),
+                            *expected_item,
+                            "Mismatch at index {} item {}",
+                            i,
+                            j
+                        );
                     }
                 }
                 None => {
@@ -1816,7 +1823,8 @@ mod tests {
                         // Extract value based on field type
                         let field_value = match field.data_type() {
                             arrow::datatypes::DataType::Utf8 => {
-                                let string_array = field_array.as_any().downcast_ref::<StringArray>().unwrap();
+                                let string_array =
+                                    field_array.as_any().downcast_ref::<StringArray>().unwrap();
                                 if string_array.is_null(i) {
                                     serde_json::Value::Null
                                 } else {
@@ -1824,11 +1832,14 @@ mod tests {
                                 }
                             }
                             arrow::datatypes::DataType::Int32 => {
-                                let int_array = field_array.as_any().downcast_ref::<Int32Array>().unwrap();
+                                let int_array =
+                                    field_array.as_any().downcast_ref::<Int32Array>().unwrap();
                                 if int_array.is_null(i) {
                                     serde_json::Value::Null
                                 } else {
-                                    serde_json::Value::Number(serde_json::Number::from(int_array.value(i)))
+                                    serde_json::Value::Number(serde_json::Number::from(
+                                        int_array.value(i),
+                                    ))
                                 }
                             }
                             // Add more types as needed
@@ -1839,7 +1850,11 @@ mod tests {
                     }
 
                     let actual_json = serde_json::Value::Object(actual_struct);
-                    assert_eq!(actual_json, *expected_struct, "Struct mismatch at index {}", i);
+                    assert_eq!(
+                        actual_json, *expected_struct,
+                        "Struct mismatch at index {}",
+                        i
+                    );
                 }
                 None => {
                     assert!(array.is_null(i), "Expected null at index {}", i);
@@ -2105,11 +2120,7 @@ mod tests {
         assert_list_of_integers_array(
             &result,
             0,
-            vec![
-                Some(vec![100, 200, 300]),
-                Some(vec![-10000000]),
-                None,
-            ],
+            vec![Some(vec![100, 200, 300]), Some(vec![-10000000]), None],
         );
     }
 
@@ -2130,14 +2141,8 @@ mod tests {
             &result,
             0,
             vec![
-                Some(vec![
-                    "[1,2,3]",
-                    "[4,5]",
-                    "[6]",
-                ]),
-                Some(vec![
-                    "[10,20]",
-                ]),
+                Some(vec!["[1,2,3]", "[4,5]", "[6]"]),
+                Some(vec!["[10,20]"]),
                 Some(vec![]),
                 None,
             ],
@@ -2161,13 +2166,8 @@ mod tests {
             &result,
             0,
             vec![
-                Some(vec![
-                    r#"{"key1":1,"key2":2}"#,
-                    r#"{"key3":3}"#,
-                ]),
-                Some(vec![
-                    r#"{"single_key":42}"#,
-                ]),
+                Some(vec![r#"{"key1":1,"key2":2}"#, r#"{"key3":3}"#]),
+                Some(vec![r#"{"single_key":42}"#]),
                 Some(vec![]),
                 None,
             ],
@@ -2176,7 +2176,8 @@ mod tests {
 
     #[test]
     fn test_list_of_structs() {
-        let columns = create_test_columns(vec![("list_col", "array(row(name varchar, age integer))")]);
+        let columns =
+            create_test_columns(vec![("list_col", "array(row(name varchar, age integer))")]);
 
         let rows = vec![
             vec![json!([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])],
@@ -2196,9 +2197,7 @@ mod tests {
                     r#"{"age":30,"name":"Alice"}"#,
                     r#"{"age":25,"name":"Bob"}"#,
                 ]),
-                Some(vec![
-                    r#"{"age":35,"name":"Charlie"}"#,
-                ]),
+                Some(vec![r#"{"age":35,"name":"Charlie"}"#]),
                 Some(vec![]),
                 None,
             ],
@@ -2230,7 +2229,10 @@ mod tests {
 
     #[test]
     fn test_struct_with_list() {
-        let columns = create_test_columns(vec![("struct_col", "row(name varchar, tags array(varchar))")]);
+        let columns = create_test_columns(vec![(
+            "struct_col",
+            "row(name varchar, tags array(varchar))",
+        )]);
 
         let rows = vec![
             vec![json!({"name": "Alice", "tags": ["tag1", "tag2", "tag3"]})],
@@ -2255,7 +2257,10 @@ mod tests {
 
     #[test]
     fn test_struct_with_map() {
-        let columns = create_test_columns(vec![("struct_col", "row(name varchar, scores map(varchar, integer))")]);
+        let columns = create_test_columns(vec![(
+            "struct_col",
+            "row(name varchar, scores map(varchar, integer))",
+        )]);
 
         let rows = vec![
             vec![json!({"name": "Alice", "scores": {"math": 95, "science": 87}})],
@@ -2281,10 +2286,15 @@ mod tests {
 
     #[test]
     fn test_struct_with_nested_struct() {
-        let columns = create_test_columns(vec![("struct_col", "row(name varchar, address row(street varchar, city varchar))")]);
+        let columns = create_test_columns(vec![(
+            "struct_col",
+            "row(name varchar, address row(street varchar, city varchar))",
+        )]);
 
         let rows = vec![
-            vec![json!({"name": "Alice", "address": {"street": "123 Main St", "city": "New York"}})],
+            vec![
+                json!({"name": "Alice", "address": {"street": "123 Main St", "city": "New York"}}),
+            ],
             vec![json!({"name": "Bob", "address": {"street": "456 Oak Ave", "city": "Boston"}})],
             vec![json!({"name": "Charlie", "address": {}})], // empty nested struct
             vec![Value::Null],
@@ -2296,8 +2306,12 @@ mod tests {
             &result,
             0,
             vec![
-                Some(json!({"name": "Alice", "address": "{\"city\":\"New York\",\"street\":\"123 Main St\"}"})),
-                Some(json!({"name": "Bob", "address": "{\"city\":\"Boston\",\"street\":\"456 Oak Ave\"}"})),
+                Some(
+                    json!({"name": "Alice", "address": "{\"city\":\"New York\",\"street\":\"123 Main St\"}"}),
+                ),
+                Some(
+                    json!({"name": "Bob", "address": "{\"city\":\"Boston\",\"street\":\"456 Oak Ave\"}"}),
+                ),
                 Some(json!({"name": "Charlie", "address": "{}"})),
                 None,
             ],
@@ -2354,10 +2368,15 @@ mod tests {
 
     #[test]
     fn test_map_with_struct() {
-        let columns = create_test_columns(vec![("map_col", "map(varchar, row(name varchar, age integer))")]);
+        let columns = create_test_columns(vec![(
+            "map_col",
+            "map(varchar, row(name varchar, age integer))",
+        )]);
 
         let rows = vec![
-            vec![json!({"person1": {"name": "Alice", "age": 30}, "person2": {"name": "Bob", "age": 25}})],
+            vec![
+                json!({"person1": {"name": "Alice", "age": 30}, "person2": {"name": "Bob", "age": 25}}),
+            ],
             vec![json!({"person3": {"name": "Charlie", "age": 35}})],
             vec![Value::Null],
         ];

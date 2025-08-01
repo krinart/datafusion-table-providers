@@ -103,8 +103,9 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
                     let field_name = field_def[..space_pos].trim();
                     let field_type = field_def[space_pos + 1..].trim();
                     let arrow_type = match trino_data_type_to_arrow_type(field_type)? {
-                        DataType::Struct(_) | DataType::List(_) | DataType::Map(_, _) =>
-                            DataType::Utf8,
+                        DataType::Struct(_) | DataType::List(_) | DataType::Map(_, _) => {
+                            DataType::Utf8
+                        }
                         inner_arrow_type => inner_arrow_type,
                     };
                     fields.push(Field::new(field_name, arrow_type, true));
@@ -399,11 +400,7 @@ mod tests {
     fn test_row_type_with_array() {
         let expected_row_array = DataType::Struct(Fields::from(vec![
             Field::new("name", DataType::Utf8, true),
-            Field::new(
-                "scores",
-                DataType::Utf8,
-                true,
-            ),
+            Field::new("scores", DataType::Utf8, true),
         ]));
         assert_eq!(
             trino_data_type_to_arrow_type("row(name varchar, scores array(integer))").unwrap(),
@@ -415,14 +412,11 @@ mod tests {
     fn test_row_type_with_map() {
         let expected_row_array = DataType::Struct(Fields::from(vec![
             Field::new("name", DataType::Utf8, true),
-            Field::new(
-                "scores",
-                DataType::Utf8,
-                true,
-            ),
+            Field::new("scores", DataType::Utf8, true),
         ]));
         assert_eq!(
-            trino_data_type_to_arrow_type("row(name varchar, scores map(varchar, integer))").unwrap(),
+            trino_data_type_to_arrow_type("row(name varchar, scores map(varchar, integer))")
+                .unwrap(),
             expected_row_array
         );
     }
@@ -431,11 +425,7 @@ mod tests {
     fn test_row_type_with_nested_row() {
         let expected_row_array = DataType::Struct(Fields::from(vec![
             Field::new("name", DataType::Utf8, true),
-            Field::new(
-                "scores",
-                DataType::Utf8,
-                true,
-            ),
+            Field::new("scores", DataType::Utf8, true),
         ]));
         assert_eq!(
             trino_data_type_to_arrow_type("row(name varchar, scores row(value integer))").unwrap(),
