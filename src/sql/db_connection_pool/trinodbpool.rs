@@ -90,7 +90,6 @@ impl TrinoConnectionPool {
     ///   * `catalog` - The default catalog to use (required)
     ///   * `schema` - The default schema to use (optional, defaults to "default")
     ///   * `user` - The user to authenticate with (optional)
-    ///   * `password` - The password for authentication (optional)
     ///   * `timeout` - Request timeout in seconds (optional, defaults to 300)
     ///   * `ssl_verification` - Whether to verify SSL certificates (optional, defaults to true)
     ///
