@@ -1863,6 +1863,40 @@ mod tests {
         }
     }
 
+    fn assert_time32_millisecond_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<i32>,
+    ) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Time32MillisecondArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
+        }
+    }
+
+    fn assert_time64_microsecond_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<i64>,
+    ) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<Time64MicrosecondArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
+        }
+    }
+
     fn assert_time64_nanosecond_array(
         record_batch: &RecordBatch,
         column_index: usize,
@@ -1880,6 +1914,23 @@ mod tests {
         }
     }
 
+    fn assert_timestamp_millisecond_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<i64>,
+    ) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<TimestampMillisecondArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
+        }
+    }
+
     fn assert_timestamp_microsecond_array(
         record_batch: &RecordBatch,
         column_index: usize,
@@ -1889,6 +1940,23 @@ mod tests {
             .column(column_index)
             .as_any()
             .downcast_ref::<TimestampMicrosecondArray>()
+            .unwrap();
+
+        assert_eq!(array.len(), expected.len(), "Array length mismatch");
+        for (i, expected_value) in expected.iter().enumerate() {
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
+        }
+    }
+
+    fn assert_timestamp_nanosecond_array(
+        record_batch: &RecordBatch,
+        column_index: usize,
+        expected: Vec<i64>,
+    ) {
+        let array = record_batch
+            .column(column_index)
+            .as_any()
+            .downcast_ref::<TimestampNanosecondArray>()
             .unwrap();
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
@@ -2221,6 +2289,117 @@ mod tests {
 
         assert_int32_array_with_nulls(&result, 0, vec![Some(42), None, Some(100)]);
         assert_string_array_with_nulls(&result, 1, vec![Some("test"), None, Some("another")]);
+    }
+
+    #[test]
+    fn test_time() {
+        let columns = create_test_columns(vec![
+            ("col1", "time(1)"), ("col2", "time(2)"), ("col3", "time(3)"),
+            ("col4", "time(4)"), ("col5", "time(5)"), ("col6", "time(6)"),
+            ("col7", "time(7)"), ("col8", "time(8)"), ("col9", "time(9)"),
+        ]);
+
+        let row = vec![
+            json!("14:30:45.1"), json!("14:30:45.12"), json!("14:30:45.123"),
+            json!("14:30:45.1234"), json!("14:30:45.12345"), json!("14:30:45.123456"),
+            json!("14:30:45.1234567"), json!("14:30:45.12345678"), json!("14:30:45.123456789"),
+        ];
+
+        let result = rows_to_arrow(&[row], &columns).unwrap();
+
+        // Expected values
+        let t = |s| NaiveTime::parse_from_str(s, "%H:%M:%S%.f").unwrap();
+
+        // Millisecond precision
+        assert_time32_millisecond_array(
+            &result,
+            0,
+            vec![t("14:30:45.1").num_seconds_from_midnight() as i32 * 1000 + (t("14:30:45.1").nanosecond() / 1_000_000) as i32],
+        );
+        assert_time32_millisecond_array(
+            &result,
+            1,
+            vec![t("14:30:45.12").num_seconds_from_midnight() as i32 * 1000 + (t("14:30:45.12").nanosecond() / 1_000_000) as i32],
+        );
+        assert_time32_millisecond_array(
+            &result,
+            2,
+            vec![t("14:30:45.123").num_seconds_from_midnight() as i32 * 1000 + (t("14:30:45.123").nanosecond() / 1_000_000) as i32],
+        );
+
+        // Microsecond precision
+        assert_time64_microsecond_array(
+            &result,
+            3,
+            vec![t("14:30:45.1234").num_seconds_from_midnight() as i64 * 1_000_000 + (t("14:30:45.1234").nanosecond() / 1_000) as i64],
+        );
+        assert_time64_microsecond_array(
+            &result,
+            4,
+            vec![t("14:30:45.12345").num_seconds_from_midnight() as i64 * 1_000_000 + (t("14:30:45.12345").nanosecond() / 1_000) as i64],
+        );
+        assert_time64_microsecond_array(
+            &result,
+            5,
+            vec![t("14:30:45.123456").num_seconds_from_midnight() as i64 * 1_000_000 + (t("14:30:45.123456").nanosecond() / 1_000) as i64],
+        );
+
+        // Nanosecond precision
+        assert_time64_nanosecond_array(
+            &result,
+            6,
+            vec![t("14:30:45.1234567").num_seconds_from_midnight() as i64 * 1_000_000_000 + t("14:30:45.1234567").nanosecond() as i64],
+        );
+        assert_time64_nanosecond_array(
+            &result,
+            7,
+            vec![t("14:30:45.12345678").num_seconds_from_midnight() as i64 * 1_000_000_000 + t("14:30:45.12345678").nanosecond() as i64],
+        );
+        assert_time64_nanosecond_array(
+            &result,
+            8,
+            vec![t("14:30:45.123456789").num_seconds_from_midnight() as i64 * 1_000_000_000 + t("14:30:45.123456789").nanosecond() as i64],
+        );
+    }
+
+    #[test]
+    fn test_timestamp() {
+        let columns = create_test_columns(vec![
+            ("col1", "timestamp(1)"), ("col2", "timestamp(2)"), ("col3", "timestamp(3)"),
+            ("col4", "timestamp(4)"), ("col5", "timestamp(5)"), ("col6", "timestamp(6)"),
+            ("col7", "timestamp(7)"), ("col8", "timestamp(8)"), ("col9", "timestamp(9)"),
+        ]);
+
+        let row = vec![
+            json!("2023-12-25T14:30:45.1Z"),
+            json!("2023-12-25T14:30:45.12Z"),
+            json!("2023-12-25T14:30:45.123Z"),
+            json!("2023-12-25T14:30:45.1234Z"),
+            json!("2023-12-25T14:30:45.12345Z"),
+            json!("2023-12-25T14:30:45.123456Z"),
+            json!("2023-12-25T14:30:45.1234567Z"),
+            json!("2023-12-25T14:30:45.12345678Z"),
+            json!("2023-12-25T14:30:45.123456789Z"),
+        ];
+
+        let result = rows_to_arrow(&[row], &columns).unwrap();
+
+        let ts = |s: &str| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .unwrap()
+                .timestamp_nanos_opt()
+                .unwrap()
+        };
+
+        assert_timestamp_millisecond_array(&result, 0, vec![ts("2023-12-25T14:30:45.1Z") / 1_000_000]);
+        assert_timestamp_millisecond_array(&result, 1, vec![ts("2023-12-25T14:30:45.12Z") / 1_000_000]);
+        assert_timestamp_millisecond_array(&result, 2, vec![ts("2023-12-25T14:30:45.123Z") / 1_000_000]);
+        assert_timestamp_microsecond_array(&result, 3, vec![ts("2023-12-25T14:30:45.1234Z") / 1_000]);
+        assert_timestamp_microsecond_array(&result, 4, vec![ts("2023-12-25T14:30:45.12345Z") / 1_000]);
+        assert_timestamp_microsecond_array(&result, 5, vec![ts("2023-12-25T14:30:45.123456Z") / 1_000]);
+        assert_timestamp_nanosecond_array(&result, 6, vec![ts("2023-12-25T14:30:45.1234567Z")]);
+        assert_timestamp_nanosecond_array(&result, 7, vec![ts("2023-12-25T14:30:45.12345678Z")]);
+        assert_timestamp_nanosecond_array(&result, 8, vec![ts("2023-12-25T14:30:45.123456789Z")]);
     }
 
     #[test]
