@@ -1,4 +1,4 @@
-use super::{Error, InvalidPrecisionSnafu, RegexSnafu, Result};
+use super::{Error, RegexSnafu, Result};
 use arrow::datatypes::DataType;
 use arrow_schema::{Field, Fields, TimeUnit};
 use regex::Regex;

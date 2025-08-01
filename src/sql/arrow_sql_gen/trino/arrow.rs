@@ -40,13 +40,13 @@ pub fn rows_to_arrow(rows: &[Vec<Value>], schema: &Option<SchemaRef>) -> Result<
         return Ok(RecordBatch::new_empty(Arc::clone(schema_ref)));
     }
 
-    let mut builders = create_builders(&schema_ref, rows.len())?;
+    let mut builders = create_builders(schema_ref, rows.len())?;
 
     for row in rows {
-        append_row_to_builders(row, &schema_ref, &mut builders)?;
+        append_row_to_builders(row, schema_ref, &mut builders)?;
     }
 
-    let arrays = finish_builders(builders, &schema_ref)?;
+    let arrays = finish_builders(builders, schema_ref)?;
 
     RecordBatch::try_new(Arc::clone(schema_ref), arrays).context(FailedToBuildRecordBatchSnafu)
 }
@@ -1678,7 +1678,7 @@ fn append_struct_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::handle_unsupported_type_error;
+    
     use arrow::array::*;
     use serde_json::{json, Value};
 
