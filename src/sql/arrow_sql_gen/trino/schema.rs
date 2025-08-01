@@ -102,7 +102,11 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
                 if let Some(space_pos) = field_def.find(' ') {
                     let field_name = field_def[..space_pos].trim();
                     let field_type = field_def[space_pos + 1..].trim();
-                    let arrow_type = trino_data_type_to_arrow_type(field_type)?;
+                    let arrow_type = match trino_data_type_to_arrow_type(field_type)? {
+                        DataType::Struct(_) | DataType::List(_) | DataType::Map(_, _) =>
+                            DataType::Utf8,
+                        inner_arrow_type => inner_arrow_type,
+                    };
                     fields.push(Field::new(field_name, arrow_type, true));
                 }
             }
@@ -397,7 +401,7 @@ mod tests {
             Field::new("name", DataType::Utf8, true),
             Field::new(
                 "scores",
-                DataType::List(Arc::new(Field::new("item", DataType::Int32, true))),
+                DataType::Utf8,
                 true,
             ),
         ]));
@@ -429,9 +433,7 @@ mod tests {
             Field::new("name", DataType::Utf8, true),
             Field::new(
                 "scores",
-                DataType::Struct(Fields::from(vec![
-                    Field::new("value", DataType::Int32, true),
-                ])),
+                DataType::Utf8,
                 true,
             ),
         ]));
