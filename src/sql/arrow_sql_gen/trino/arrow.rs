@@ -87,15 +87,21 @@ fn create_empty_array(data_type: &DataType) -> ArrayRef {
             Arc::new(Time64MicrosecondBuilder::new().finish())
         }
         DataType::Time64(TimeUnit::Nanosecond) => Arc::new(Time64NanosecondBuilder::new().finish()),
-        DataType::Timestamp(TimeUnit::Microsecond, _) => {
-            Arc::new(TimestampMicrosecondBuilder::new().finish())
-        }
-        DataType::Timestamp(TimeUnit::Millisecond, _) => {
-            Arc::new(TimestampMillisecondBuilder::new().finish())
-        }
-        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-            Arc::new(TimestampNanosecondBuilder::new().finish())
-        }
+        DataType::Timestamp(TimeUnit::Microsecond, tz_opt) => Arc::new(
+            TimestampMicrosecondBuilder::new()
+                .with_timezone_opt(tz_opt.clone())
+                .finish(),
+        ),
+        DataType::Timestamp(TimeUnit::Millisecond, tz_opt) => Arc::new(
+            TimestampMillisecondBuilder::new()
+                .with_timezone_opt(tz_opt.clone())
+                .finish(),
+        ),
+        DataType::Timestamp(TimeUnit::Nanosecond, tz_opt) => Arc::new(
+            TimestampNanosecondBuilder::new()
+                .with_timezone_opt(tz_opt.clone())
+                .finish(),
+        ),
         DataType::Decimal128(precision, scale) => Arc::new(Decimal128Builder::new().finish()),
         DataType::Decimal256(_, _) => Arc::new(Decimal256Builder::new().finish()),
         DataType::List(_) => {
@@ -162,23 +168,14 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         DataType::Time64(TimeUnit::Nanosecond) => {
             Ok(Box::new(Time64NanosecondBuilder::with_capacity(capacity)))
         }
-        DataType::Timestamp(TimeUnit::Millisecond, None) => Ok(Box::new(
-            TimestampMillisecondBuilder::with_capacity(capacity),
+        DataType::Timestamp(TimeUnit::Millisecond, tz_opt) => Ok(Box::new(
+            TimestampMillisecondBuilder::with_capacity(capacity).with_timezone_opt(tz_opt.clone()),
         )),
-        DataType::Timestamp(TimeUnit::Microsecond, None) => Ok(Box::new(
-            TimestampMicrosecondBuilder::with_capacity(capacity),
+        DataType::Timestamp(TimeUnit::Microsecond, tz_opt) => Ok(Box::new(
+            TimestampMicrosecondBuilder::with_capacity(capacity).with_timezone_opt(tz_opt.clone()),
         )),
-        DataType::Timestamp(TimeUnit::Nanosecond, None) => Ok(Box::new(
-            TimestampNanosecondBuilder::with_capacity(capacity),
-        )),
-        DataType::Timestamp(TimeUnit::Millisecond, Some(tz)) => Ok(Box::new(
-            TimestampMillisecondBuilder::with_capacity(capacity).with_timezone(tz.clone()),
-        )),
-        DataType::Timestamp(TimeUnit::Microsecond, Some(tz)) => Ok(Box::new(
-            TimestampMicrosecondBuilder::with_capacity(capacity).with_timezone(tz.clone()),
-        )),
-        DataType::Timestamp(TimeUnit::Nanosecond, Some(tz)) => Ok(Box::new(
-            TimestampNanosecondBuilder::with_capacity(capacity).with_timezone(tz.clone()),
+        DataType::Timestamp(TimeUnit::Nanosecond, tz_opt) => Ok(Box::new(
+            TimestampNanosecondBuilder::with_capacity(capacity).with_timezone_opt(tz_opt.clone()),
         )),
         DataType::Decimal128(precision, scale) => {
             let builder = Decimal128BuilderWrapper::new(capacity, *precision, *scale)
