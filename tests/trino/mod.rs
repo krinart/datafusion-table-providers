@@ -240,7 +240,6 @@ async fn test_trino_binary_types(port: usize) {
         .await
         .expect("Table should be created");
 
-    // Note: Trino uses X'...' syntax for binary literals
     let insert_sql = r#"
         INSERT INTO memory.default.binary_table VALUES
         (X'68656c6c6f20776f726c64', X'62696e6172792066696c6520636f6e74656e74')
@@ -315,45 +314,37 @@ async fn test_trino_array_types(port: usize) {
         ),
     ]));
 
-    // Create string arrays
     let string_tags_builder = ListBuilder::new(StringBuilder::new());
     let mut string_tags_list = string_tags_builder;
 
-    // First row: ["rust", "trino", "arrow"]
     string_tags_list.values().append_value("rust");
     string_tags_list.values().append_value("trino");
     string_tags_list.values().append_value("arrow");
     string_tags_list.append(true);
 
-    // Second row: ["python", "sql"]
     string_tags_list.values().append_value("python");
     string_tags_list.values().append_value("sql");
     string_tags_list.append(true);
 
     let string_tags_array = Arc::new(string_tags_list.finish());
 
-    // Create int arrays
     let int_numbers_builder = ListBuilder::new(Int32Builder::new());
     let mut int_numbers_list = int_numbers_builder;
 
-    // First row: [1, 2, 3]
     int_numbers_list.values().append_value(1);
     int_numbers_list.values().append_value(2);
     int_numbers_list.values().append_value(3);
     int_numbers_list.append(true);
 
-    // Second row: [4, 5]
     int_numbers_list.values().append_value(4);
     int_numbers_list.values().append_value(5);
     int_numbers_list.append(true);
 
     let int_numbers_array = Arc::new(int_numbers_list.finish());
 
-    // Create empty arrays
     let empty_array_builder = ListBuilder::new(StringBuilder::new());
     let mut empty_array_list = empty_array_builder;
 
-    // Two empty arrays
     empty_array_list.append(true);
     empty_array_list.append(true);
 
@@ -401,7 +392,6 @@ async fn test_trino_json_types(port: usize) {
         .await
         .expect("Data should be inserted");
 
-    // Test by querying the data - JSON is typically returned as string representation
     let ctx = SessionContext::new();
     let trino_conn_pool = common::get_trino_connection_pool(port)
         .await
@@ -427,7 +417,6 @@ async fn test_trino_json_types(port: usize) {
     assert_eq!(batch.num_rows(), 2);
     assert_eq!(batch.num_columns(), 3);
 
-    // Verify we have JSON data (usually represented as strings)
     let user_data_array = batch
         .column_by_name("user_data")
         .unwrap()
@@ -509,7 +498,6 @@ async fn arrow_trino_one_way(
 
     let ctx = SessionContext::new();
 
-    // Register DataFusion table
     let trino_conn_pool = common::get_trino_connection_pool(port)
         .await
         .expect("Trino connection pool should be created");
@@ -524,7 +512,6 @@ async fn arrow_trino_one_way(
     ctx.register_table(table_name, Arc::new(table))
         .expect("Table should be registered");
 
-    // Extract expected columns
     let schema_ref = expected_record.schema();
     let expected_fields: Vec<&str> = schema_ref
         .fields()
@@ -532,7 +519,6 @@ async fn arrow_trino_one_way(
         .map(|f| f.name().as_str())
         .collect();
 
-    // Build SELECT query with correct projection
     let projection = expected_fields
         .iter()
         .map(|c| format!("\"{c}\""))
@@ -548,7 +534,6 @@ async fn arrow_trino_one_way(
     let record_batches = df.collect().await.expect("RecordBatch should be collected");
     assert_eq!(record_batches.len(), 1);
 
-    // Normalize actual and expected
     let actual_projected =
         project_record_batch(&record_batches[0], &expected_fields).expect("Project actual");
     let expected_projected =
