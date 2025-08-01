@@ -219,7 +219,6 @@ impl TrinoConnection {
     async fn execute_query(&self, sql: &str) -> Result<TrinoQueryResult, Error> {
         let url = format!("{}/v1/statement", self.base_url);
 
-        // Step 1: Submit the query
         let response = self
             .client
             .clone()
@@ -248,7 +247,6 @@ impl TrinoConnection {
         let mut columns: Vec<TrinoColumn> = Vec::new();
 
         loop {
-            // Extract column information
             if columns.is_empty() {
                 if let Some(cols) = result.get("columns").and_then(|c| c.as_array()) {
                     for col in cols {
@@ -273,7 +271,6 @@ impl TrinoConnection {
 
             let state = result["stats"]["state"].as_str().unwrap_or("");
 
-            // Extract data rows
             if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
                 for row in data {
                     if let Some(row_array) = row.as_array() {
@@ -282,7 +279,6 @@ impl TrinoConnection {
                 }
             }
 
-            // Check if query is finished
             if state == "FINISHED" {
                 break;
             } else if state == "FAILED" {
@@ -298,7 +294,6 @@ impl TrinoConnection {
             }
 
             if let Some(next_uri) = result.get("nextUri").and_then(|u| u.as_str()) {
-                // Wait before polling
                 sleep(Duration::from_millis(50)).await;
 
                 let response = self

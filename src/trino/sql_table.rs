@@ -46,9 +46,7 @@ impl TrinoTable {
         let dyn_pool =
             Arc::clone(pool) as Arc<dyn DbConnectionPool<Arc<Client>, &'static str> + Send + Sync>;
 
-        // Use a Trino-specific dialect or DefaultDialect for now
-        // Trino SQL is close to standard SQL, so DefaultDialect should work well
-        let base_table = SqlTable::new("schema", &dyn_pool, table_reference, Some(Engine::Spark))
+        let base_table = SqlTable::new("schema", &dyn_pool, table_reference, Some(Engine::Trino))
             .await?
             .with_dialect(Arc::new(DefaultDialect {}));
 

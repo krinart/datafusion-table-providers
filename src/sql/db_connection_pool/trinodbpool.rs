@@ -3,11 +3,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::{Client, Identity};
-use secrecy::{ExposeSecret, SecretBox, SecretString};
-use serde_json::Value;
+use secrecy::{ExposeSecret, SecretString};
 use snafu::{ResultExt, Snafu};
 use std::{collections::HashMap, fs, sync::Arc, time::Duration};
-// use tokio_postgres::types::ToSql;
 
 use crate::{
     sql::db_connection_pool::{
@@ -162,7 +160,6 @@ impl TrinoConnectionPool {
         })
     }
 
-    /// Specify the action to take when an unsupported type is encountered.
     #[must_use]
     pub fn with_unsupported_type_action(mut self, action: UnsupportedTypeAction) -> Self {
         self.unsupported_type_action = action;

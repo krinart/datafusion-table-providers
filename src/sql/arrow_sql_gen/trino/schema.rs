@@ -94,7 +94,6 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
             let inner = &type_str[start + 1..end];
             let mut fields = Vec::new();
 
-            // To handle commas inside parentheses
             let field_definitions = split_respecting_parentheses(inner, ',');
 
             for field_def in field_definitions {
@@ -353,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_map_types() {
-        // Maps are not supported
+        // Maps are represented as strings
 
         assert_eq!(
             trino_data_type_to_arrow_type("map(varchar, integer)").unwrap(),

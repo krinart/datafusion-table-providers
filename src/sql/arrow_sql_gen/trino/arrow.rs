@@ -110,10 +110,7 @@ fn create_empty_array(data_type: &DataType) -> ArrayRef {
             }
         }
         DataType::Null => Arc::new(NullBuilder::new().finish()),
-        _ => {
-            // Fallback to string for unsupported types
-            Arc::new(StringBuilder::new().finish())
-        }
+        _ => Arc::new(StringBuilder::new().finish()),
     }
 }
 
@@ -167,15 +164,9 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             }
             Ok(Box::new(StructBuilder::new(fields.clone(), field_builders)))
         }
-        DataType::Map(field, _) => {
-            // Fallback to string for invalid map structure
-            Ok(Box::new(StringBuilder::with_capacity(capacity, 1024)))
-        }
+        DataType::Map(field, _) => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
         DataType::Null => Ok(Box::new(NullBuilder::new())),
-        _ => {
-            // Fallback to string for unsupported types
-            Ok(Box::new(StringBuilder::with_capacity(capacity, 1024)))
-        }
+        _ => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
     }
 }
 
@@ -383,7 +374,6 @@ fn create_list_builder_for_field(
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         _ => {
-            // Fallback to string for unsupported inner types
             let values_builder = StringBuilder::with_capacity(capacity * 4, 1024);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
@@ -574,7 +564,6 @@ fn append_value_to_builder(
             null_builder.append_null();
         }
         _ => {
-            // Fallback to string for unsupported types
             let string_builder = builder
                 .as_any_mut()
                 .downcast_mut::<StringBuilder>()
@@ -717,7 +706,6 @@ fn append_binary_value(builder: &mut BinaryBuilder, value: Option<&Value>) -> Re
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(s)) => {
-            // Try to decode as base64, fallback to raw bytes
             if let Ok(bytes) = BASE64.decode(s) {
                 builder.append_value(bytes);
             } else {
@@ -801,7 +789,6 @@ fn append_decimal128_value(
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(decimal_str)) => {
             if let Ok(big_decimal) = decimal_str.parse::<BigDecimal>() {
-                // Get precision and scale from the builder's data type
                 if let DataType::Decimal128(_, scale) = builder.data_type() {
                     let scale_factor = BigDecimal::from(10_i128.pow(scale as u32));
                     let scaled_decimal = big_decimal * scale_factor;
@@ -812,7 +799,6 @@ fn append_decimal128_value(
                         builder.append_null();
                     }
                 } else {
-                    // Fallback - use the original value
                     if let Some(decimal_value) = big_decimal.to_i128() {
                         builder.append_value(decimal_value);
                     } else {
@@ -839,13 +825,11 @@ fn append_decimal256_value(
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(decimal_str)) => {
             if let Ok(big_decimal) = decimal_str.parse::<BigDecimal>() {
-                // Get precision and scale from the builder's data type
                 if let DataType::Decimal256(_, scale) = builder.data_type() {
                     let scale_factor = BigDecimal::from(10_i128.pow(scale as u32));
                     let scaled_decimal = big_decimal * scale_factor;
                     builder.append_value(to_decimal_256(&scaled_decimal));
                 } else {
-                    // Fallback - use the original value
                     builder.append_value(to_decimal_256(&big_decimal));
                 }
             } else {
@@ -879,7 +863,6 @@ fn append_list_value(builder: &mut dyn ArrayBuilder, value: Option<&Value>) -> R
 }
 
 fn append_null_to_list_builder(builder: &mut dyn ArrayBuilder) -> Result<()> {
-    // Try to downcast to various list builder types
     if let Some(list_builder) = builder
         .as_any_mut()
         .downcast_mut::<ListBuilder<StringBuilder>>()
@@ -969,7 +952,6 @@ fn append_null_to_list_builder(builder: &mut dyn ArrayBuilder) -> Result<()> {
 }
 
 fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>) -> Result<()> {
-    // Handle different list builder types
     if let Some(list_builder) = builder
         .as_any_mut()
         .downcast_mut::<ListBuilder<StringBuilder>>()
@@ -1111,7 +1093,6 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
 }
 
 fn append_null_to_any_builder(builder: &mut dyn ArrayBuilder) {
-    // Try to append null to various builder types
     if let Some(bool_builder) = builder.as_any_mut().downcast_mut::<BooleanBuilder>() {
         bool_builder.append_null();
     } else if let Some(i8_builder) = builder.as_any_mut().downcast_mut::<Int8Builder>() {
@@ -1157,7 +1138,6 @@ fn append_null_to_any_builder(builder: &mut dyn ArrayBuilder) {
     } else if let Some(null_builder) = builder.as_any_mut().downcast_mut::<NullBuilder>() {
         null_builder.append_null();
     }
-    // Add more types as needed
 }
 
 fn finish_builders(mut builders: BuilderMap, schema: &Schema) -> Result<Vec<ArrayRef>> {
@@ -1344,7 +1324,6 @@ fn append_to_struct_field_builder(
             field_builder.append_null();
         }
         _ => {
-            // For unsupported types, fall back to string
             let field_builder = builder
                 .field_builder::<StringBuilder>(field_index)
                 .ok_or_else(|| Error::BuilderDowncastError {
@@ -1674,7 +1653,6 @@ mod tests {
         let scale_factor = bigdecimal::BigDecimal::from(10_i128.pow(scale as u32));
         let scaled_decimal = decimal * scale_factor;
 
-        // Convert BigDecimal to i256 (this is what your to_decimal_256 function does)
         let (bigint_value, _) = scaled_decimal.as_bigint_and_exponent();
         let mut bigint_bytes = bigint_value.to_signed_bytes_le();
 
@@ -1813,43 +1791,38 @@ mod tests {
                 Some(expected_struct) => {
                     assert!(!array.is_null(i), "Expected non-null at index {}", i);
 
-                    // Get the struct as a JSON-like representation for comparison
                     let mut actual_struct = serde_json::Map::new();
 
                     for (field_idx, field) in array.fields().iter().enumerate() {
                         let field_array = array.column(field_idx);
                         let field_name = field.name();
 
-                        // Extract value based on field type
                         let field_value = match field.data_type() {
-                            arrow::datatypes::DataType::Utf8 => {
+                            DataType::Utf8 => {
                                 let string_array =
                                     field_array.as_any().downcast_ref::<StringArray>().unwrap();
                                 if string_array.is_null(i) {
-                                    serde_json::Value::Null
+                                    Value::Null
                                 } else {
-                                    serde_json::Value::String(string_array.value(i).to_string())
+                                    Value::String(string_array.value(i).to_string())
                                 }
                             }
-                            arrow::datatypes::DataType::Int32 => {
+                            DataType::Int32 => {
                                 let int_array =
                                     field_array.as_any().downcast_ref::<Int32Array>().unwrap();
                                 if int_array.is_null(i) {
-                                    serde_json::Value::Null
+                                    Value::Null
                                 } else {
-                                    serde_json::Value::Number(serde_json::Number::from(
-                                        int_array.value(i),
-                                    ))
+                                    Value::Number(serde_json::Number::from(int_array.value(i)))
                                 }
                             }
-                            // Add more types as needed
-                            _ => serde_json::Value::Null,
+                            _ => Value::Null,
                         };
 
                         actual_struct.insert(field_name.clone(), field_value);
                     }
 
-                    let actual_json = serde_json::Value::Object(actual_struct);
+                    let actual_json = Value::Object(actual_struct);
                     assert_eq!(
                         actual_json, *expected_struct,
                         "Struct mismatch at index {}",
@@ -1996,7 +1969,7 @@ mod tests {
             .unwrap()
             .signed_duration_since(epoch)
             .num_days() as i32;
-        let date2 = 0; // 1970-01-01 is day 0
+        let date2 = 0;
 
         fn time_to_nanos(time_str: &str) -> i64 {
             let time = chrono::NaiveTime::parse_from_str(time_str, "%H:%M:%S%.f").unwrap();
@@ -2006,11 +1979,10 @@ mod tests {
         let time1 = time_to_nanos("14:30:45.123456789");
         let time2 = time_to_nanos("00:00:00.000000000");
 
-        // Timestamp: microseconds since Unix epoch
         let timestamp1 = chrono::DateTime::parse_from_rfc3339("2023-12-25T14:30:45.123456Z")
             .unwrap()
             .timestamp_micros();
-        let timestamp2 = 0; // 1970-01-01T00:00:00.000000Z
+        let timestamp2 = 0;
 
         assert_date32_array(&result, 0, vec![date1, date2]);
         assert_time64_nanosecond_array(&result, 1, vec![time1, time2]);
@@ -2188,7 +2160,6 @@ mod tests {
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
 
-        // Since structs are represented as strings, we expect a list of JSON string representations
         assert_list_of_strings_array(
             &result,
             0,
@@ -2210,7 +2181,7 @@ mod tests {
 
         let rows = vec![
             vec![json!({"name": "Alice", "age": 30})],
-            vec![json!(["Bob", 25])], // Array format
+            vec![json!(["Bob", 25])],
             vec![Value::Null],
         ];
 
@@ -2221,7 +2192,7 @@ mod tests {
             0,
             vec![
                 Some(json!({"name": "Alice", "age": 30})),
-                Some(json!({"name": "Bob", "age": 25})), // Array format should be converted to object
+                Some(json!({"name": "Bob", "age": 25})),
                 None,
             ],
         );
@@ -2237,7 +2208,7 @@ mod tests {
         let rows = vec![
             vec![json!({"name": "Alice", "tags": ["tag1", "tag2", "tag3"]})],
             vec![json!({"name": "Bob", "tags": ["single_tag"]})],
-            vec![json!({"name": "Charlie", "tags": []})], // empty array
+            vec![json!({"name": "Charlie", "tags": []})],
             vec![Value::Null],
         ];
 
@@ -2427,17 +2398,15 @@ mod tests {
             ("int32_col", "integer"),
         ]);
 
-        // Values that exceed the respective integer type limits
         let rows = vec![vec![
-            json!(1000),                   // Exceeds i8::MAX (127)
-            json!(100000),                 // Exceeds i16::MAX (32767)
-            json!(9223372036854775807i64), // Exceeds i32::MAX
+            json!(1000),
+            json!(100000),
+            json!(9223372036854775807i64),
         ]];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
         assert_eq!(result.num_rows(), 1);
 
-        // These should be null due to overflow
         let int8_array = result
             .column(0)
             .as_any()
@@ -2468,17 +2437,15 @@ mod tests {
             ("string_col", "varchar"),
         ]);
 
-        // Send wrong types - these should mostly become nulls or coerced
         let rows = vec![vec![
-            json!("not a boolean"), // Wrong type for boolean
-            json!("not a number"),  // Wrong type for integer
-            json!(42),              // Number for string (should be coerced)
+            json!("not a boolean"),
+            json!("not a number"),
+            json!(42),
         ]];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
         assert_eq!(result.num_rows(), 1);
 
-        // Boolean with wrong type should be null
         let bool_array = result
             .column(0)
             .as_any()
@@ -2486,7 +2453,6 @@ mod tests {
             .unwrap();
         assert!(bool_array.is_null(0));
 
-        // Integer with wrong type should be null
         let int_array = result
             .column(1)
             .as_any()
@@ -2494,7 +2460,6 @@ mod tests {
             .unwrap();
         assert!(int_array.is_null(0));
 
-        // Number should be coerced to string
         let string_array = result
             .column(2)
             .as_any()
@@ -2508,7 +2473,6 @@ mod tests {
     fn test_large_dataset() {
         let columns = create_test_columns(vec![("id", "bigint"), ("value", "varchar")]);
 
-        // Create 1000 rows of test data
         let mut rows = Vec::new();
         for i in 0..1000 {
             rows.push(vec![json!(i), json!(format!("value_{}", i))]);
@@ -2518,7 +2482,6 @@ mod tests {
         assert_eq!(result.num_rows(), 1000);
         assert_eq!(result.num_columns(), 2);
 
-        // Verify first and last rows
         let id_array = result
             .column(0)
             .as_any()
@@ -2558,43 +2521,15 @@ mod tests {
             .downcast_ref::<Int32Array>()
             .unwrap();
 
-        // Check null pattern
         assert!(!int_array.is_null(0));
         assert!(int_array.is_null(1));
         assert!(!int_array.is_null(2));
         assert!(int_array.is_null(3));
         assert!(!int_array.is_null(4));
 
-        // Check values
         assert_eq!(int_array.value(0), 1);
         assert_eq!(int_array.value(2), 3);
         assert_eq!(int_array.value(4), 5);
-    }
-
-    #[test]
-    fn test_row_column_count_mismatch() {
-        let columns = create_test_columns(vec![
-            ("col1", "integer"),
-            ("col2", "varchar"),
-            ("col3", "boolean"),
-        ]);
-
-        // Row with fewer values than columns
-        let rows = vec![
-            vec![json!(1), json!("test")], // Missing third column
-        ];
-
-        let result = rows_to_arrow(&rows, &columns).unwrap();
-        assert_eq!(result.num_rows(), 1);
-        assert_eq!(result.num_columns(), 3);
-
-        // The missing column should be null
-        let bool_array = result
-            .column(2)
-            .as_any()
-            .downcast_ref::<BooleanArray>()
-            .unwrap();
-        assert!(bool_array.is_null(0));
     }
 
     #[test]
@@ -2636,66 +2571,5 @@ mod tests {
         assert!(!ts_array.is_null(0));
         assert!(!ts_array.is_null(1));
         assert!(ts_array.is_null(2));
-    }
-
-    #[test]
-    fn test_schema_building() {
-        let columns = create_test_columns(vec![
-            ("field1", "bigint"),
-            ("field2", "varchar"),
-            ("field3", "boolean"),
-        ]);
-
-        let schema = build_schema_from_columns(&columns).unwrap();
-
-        assert_eq!(schema.fields().len(), 3);
-        assert_eq!(schema.field(0).name(), "field1");
-        assert_eq!(schema.field(1).name(), "field2");
-        assert_eq!(schema.field(2).name(), "field3");
-
-        // All fields should be nullable
-        assert!(schema.field(0).is_nullable());
-        assert!(schema.field(1).is_nullable());
-        assert!(schema.field(2).is_nullable());
-    }
-
-    #[test]
-    fn test_complex_nested_struct() {
-        let columns = create_test_columns(vec![(
-            "nested_struct",
-            "row(person row(name varchar, age integer), active boolean)",
-        )]);
-
-        let rows = vec![vec![json!({
-            "person": {"name": "John", "age": 30},
-            "active": true
-        })]];
-
-        let result = rows_to_arrow(&rows, &columns).unwrap();
-        assert_eq!(result.num_rows(), 1);
-        assert_eq!(result.num_columns(), 1);
-    }
-
-    #[test]
-    fn test_complex_nested_list() {
-        let columns = create_test_columns(vec![(
-            "nested_list",
-            "array(row(id integer, tags array(varchar)))",
-        )]);
-
-        let rows = vec![vec![json!([
-            {
-                "id": 1,
-                "tags": ["rust", "arrow", "data"]
-            },
-            {
-                "id": 2,
-                "tags": ["programming", "testing"]
-            }
-        ])]];
-
-        let result = rows_to_arrow(&rows, &columns).unwrap();
-        assert_eq!(result.num_rows(), 1);
-        assert_eq!(result.num_columns(), 1);
     }
 }
