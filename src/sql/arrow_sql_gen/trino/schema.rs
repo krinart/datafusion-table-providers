@@ -1,10 +1,31 @@
-use super::{Error, Result};
+use super::{Error, InvalidPrecisionSnafu, RegexSnafu, Result};
 use arrow::datatypes::DataType;
 use arrow_schema::{Field, Fields, TimeUnit};
+use regex::Regex;
+use snafu::ResultExt;
 use std::sync::Arc;
 
 pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType> {
     let normalized_type = trino_type.to_lowercase();
+
+    if normalized_type.starts_with("time(") {
+        let time_unit = time_unit_from_precision(extract_precision(&normalized_type, "time")?);
+
+        return match time_unit {
+            TimeUnit::Millisecond => Ok(DataType::Time32(TimeUnit::Millisecond)),
+            time_unit => Ok(DataType::Time64(time_unit)),
+        };
+    }
+
+    if normalized_type.contains("with time zone") && normalized_type.starts_with("timestamp(") {
+        let time_unit = time_unit_from_precision(extract_precision(&normalized_type, "timestamp")?);
+        return Ok(DataType::Timestamp(time_unit, Some("UTC".into())));
+    }
+
+    if normalized_type.starts_with("timestamp(") {
+        let time_unit = time_unit_from_precision(extract_precision(&normalized_type, "timestamp")?);
+        return Ok(DataType::Timestamp(time_unit, None));
+    }
 
     match normalized_type.as_str() {
         "null" => Ok(DataType::Null),
@@ -19,12 +40,6 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
         "varbinary" => Ok(DataType::Binary),
         "json" => Ok(DataType::LargeUtf8),
         "date" => Ok(DataType::Date32),
-        "time" => Ok(DataType::Time64(TimeUnit::Nanosecond)),
-        "timestamp" => Ok(DataType::Timestamp(TimeUnit::Microsecond, None)),
-        "timestamp with time zone" => Ok(DataType::Timestamp(
-            TimeUnit::Microsecond,
-            Some("UTC".into()),
-        )),
         _ if normalized_type.starts_with("decimal") || normalized_type.starts_with("numeric") => {
             parse_decimal_type(&normalized_type)
         }
@@ -37,6 +52,38 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
         _ => Err(Error::UnsupportedTrinoType {
             trino_type: trino_type.to_string(),
         }),
+    }
+}
+
+pub fn extract_precision(s: &str, prefix: &str) -> Result<u32> {
+    let pattern = format!(r"^{}(?:\((\d+)\))?", regex::escape(prefix));
+    let re = Regex::new(&pattern).context(RegexSnafu)?;
+    let caps = re.captures(s).ok_or_else(|| Error::InvalidPrecision {
+        trino_type: s.to_string(),
+    })?;
+
+    let precision = match caps.get(1) {
+        Some(m) => m
+            .as_str()
+            .parse::<u32>()
+            .map_err(|_| Error::InvalidPrecision {
+                trino_type: s.to_string(),
+            })?,
+        None => {
+            return Err(Error::InvalidPrecision {
+                trino_type: s.to_string(),
+            })
+        }
+    };
+
+    Ok(precision)
+}
+
+fn time_unit_from_precision(p: u32) -> TimeUnit {
+    match p {
+        0..=3 => TimeUnit::Millisecond,
+        4..=6 => TimeUnit::Microsecond,
+        _ => TimeUnit::Nanosecond,
     }
 }
 
@@ -230,22 +277,136 @@ mod tests {
     }
 
     #[test]
-    fn test_temporal_types() {
+    fn test_date() {
         assert_eq!(
             trino_data_type_to_arrow_type("date").unwrap(),
             DataType::Date32
         );
+    }
+
+    #[test]
+    fn test_time() {
         assert_eq!(
-            trino_data_type_to_arrow_type("time").unwrap(),
+            trino_data_type_to_arrow_type("time(1)").unwrap(),
+            DataType::Time32(TimeUnit::Millisecond)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("time(2)").unwrap(),
+            DataType::Time32(TimeUnit::Millisecond)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("time(3)").unwrap(),
+            DataType::Time32(TimeUnit::Millisecond)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("time(4)").unwrap(),
+            DataType::Time64(TimeUnit::Microsecond)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("time(5)").unwrap(),
+            DataType::Time64(TimeUnit::Microsecond)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("time(6)").unwrap(),
+            DataType::Time64(TimeUnit::Microsecond)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("time(7)").unwrap(),
             DataType::Time64(TimeUnit::Nanosecond)
         );
         assert_eq!(
-            trino_data_type_to_arrow_type("timestamp").unwrap(),
+            trino_data_type_to_arrow_type("time(8)").unwrap(),
+            DataType::Time64(TimeUnit::Nanosecond)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("time(9)").unwrap(),
+            DataType::Time64(TimeUnit::Nanosecond)
+        );
+    }
+
+    #[test]
+    fn test_timestamp() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(1)").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, None)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(2)").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, None)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(3)").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, None)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(4)").unwrap(),
             DataType::Timestamp(TimeUnit::Microsecond, None)
         );
         assert_eq!(
-            trino_data_type_to_arrow_type("timestamp with time zone").unwrap(),
+            trino_data_type_to_arrow_type("timestamp(5)").unwrap(),
+            DataType::Timestamp(TimeUnit::Microsecond, None)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(6)").unwrap(),
+            DataType::Timestamp(TimeUnit::Microsecond, None)
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(7)").unwrap(),
+            DataType::Timestamp(TimeUnit::Nanosecond, None)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(8)").unwrap(),
+            DataType::Timestamp(TimeUnit::Nanosecond, None)
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(9)").unwrap(),
+            DataType::Timestamp(TimeUnit::Nanosecond, None)
+        );
+    }
+
+    #[test]
+    fn test_timestamp_with_timezone() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(1) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()))
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(2) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()))
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(3) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()))
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(4) with time zone").unwrap(),
             DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(5) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(6) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
+
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(7) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()))
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(8) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()))
+        );
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(9) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Nanosecond, Some("UTC".into()))
         );
     }
 
@@ -262,10 +423,6 @@ mod tests {
         assert_eq!(
             trino_data_type_to_arrow_type("VARCHAR").unwrap(),
             DataType::Utf8
-        );
-        assert_eq!(
-            trino_data_type_to_arrow_type("TIMESTAMP WITH TIME ZONE").unwrap(),
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
         );
     }
 
@@ -437,5 +594,41 @@ mod tests {
         if let Err(Error::UnsupportedTrinoType { trino_type }) = result {
             assert_eq!(trino_type, "unknown_type");
         }
+    }
+
+    #[test]
+    fn test_extract_precision() {
+        let result = extract_precision("time(3)", "time");
+        assert_eq!(result.unwrap(), 3);
+
+        let result = extract_precision("timestamp(6)", "timestamp");
+        assert_eq!(result.unwrap(), 6);
+
+        let result = extract_precision("timestamp(9) with time zone", "timestamp");
+        assert_eq!(result.unwrap(), 9);
+
+        let result = extract_precision("time", "time");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::InvalidPrecision { .. }
+        ));
+
+        let result = extract_precision("timestamp(x)", "timestamp");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::InvalidPrecision { .. }
+        ));
+
+        let result = extract_precision("row(x integer)", "timestamp");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::InvalidPrecision { .. }
+        ));
+
+        let result = extract_precision("array(timestamp(6))", "timestamp");
+        assert!(result.is_err());
     }
 }

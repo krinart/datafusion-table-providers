@@ -35,4 +35,10 @@ pub enum Error {
 
     #[snafu(display("Invalid or unsupported data type: {data_type}"))]
     InvalidDataType { data_type: String },
+
+    #[snafu(display("Failed to parse precision from type: '{}'", trino_type))]
+    InvalidPrecision { trino_type: String },
+
+    #[snafu(display("Failed to compile regex pattern: {}", source))]
+    RegexError { source: regex::Error },
 }

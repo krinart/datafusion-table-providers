@@ -206,7 +206,11 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 }
 
 impl TrinoConnection {
-    pub fn new_with_config(client: Arc<reqwest::Client>, base_url: String, poll_wait_time: Duration) -> Self {
+    pub fn new_with_config(
+        client: Arc<reqwest::Client>,
+        base_url: String,
+        poll_wait_time: Duration,
+    ) -> Self {
         TrinoConnection {
             client,
             base_url,

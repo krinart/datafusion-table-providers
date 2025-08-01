@@ -5,8 +5,9 @@ use arrow::{
         ArrayBuilder, ArrayRef, BinaryBuilder, BooleanBuilder, Date32Builder, Decimal128Builder,
         Decimal256Builder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
         Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder, MapBuilder, NullBuilder,
-        RecordBatch, StringBuilder, StructBuilder, Time64NanosecondBuilder,
-        TimestampMicrosecondBuilder,
+        RecordBatch, StringBuilder, StructBuilder, Time32MillisecondBuilder,
+        Time64MicrosecondBuilder, Time64NanosecondBuilder, TimestampMicrosecondBuilder,
+        TimestampMillisecondBuilder, TimestampNanosecondBuilder,
     },
     datatypes::{i256, DataType, Date32Type, Field, Fields, Schema, TimeUnit},
 };
@@ -15,7 +16,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use bigdecimal::BigDecimal;
 use bigdecimal::ToPrimitive;
-use chrono::{NaiveDate, NaiveTime, Timelike};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
 use serde_json::Value;
 use snafu::ResultExt;
 use std::any::Any;
@@ -79,9 +80,21 @@ fn create_empty_array(data_type: &DataType) -> ArrayRef {
         DataType::LargeUtf8 => Arc::new(LargeStringBuilder::new().finish()),
         DataType::Binary => Arc::new(BinaryBuilder::new().finish()),
         DataType::Date32 => Arc::new(Date32Builder::new().finish()),
+        DataType::Time32(TimeUnit::Millisecond) => {
+            Arc::new(Time32MillisecondBuilder::new().finish())
+        }
+        DataType::Time64(TimeUnit::Microsecond) => {
+            Arc::new(Time64MicrosecondBuilder::new().finish())
+        }
         DataType::Time64(TimeUnit::Nanosecond) => Arc::new(Time64NanosecondBuilder::new().finish()),
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
             Arc::new(TimestampMicrosecondBuilder::new().finish())
+        }
+        DataType::Timestamp(TimeUnit::Millisecond, _) => {
+            Arc::new(TimestampMillisecondBuilder::new().finish())
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+            Arc::new(TimestampNanosecondBuilder::new().finish())
         }
         DataType::Decimal128(precision, scale) => Arc::new(Decimal128Builder::new().finish()),
         DataType::Decimal256(_, _) => Arc::new(Decimal256Builder::new().finish()),
@@ -140,11 +153,23 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         DataType::LargeUtf8 => Ok(Box::new(LargeStringBuilder::with_capacity(capacity, 1024))),
         DataType::Binary => Ok(Box::new(BinaryBuilder::with_capacity(capacity, 1024))),
         DataType::Date32 => Ok(Box::new(Date32Builder::with_capacity(capacity))),
+        DataType::Time32(TimeUnit::Millisecond) => {
+            Ok(Box::new(Time32MillisecondBuilder::with_capacity(capacity)))
+        }
+        DataType::Time64(TimeUnit::Microsecond) => {
+            Ok(Box::new(Time64MicrosecondBuilder::with_capacity(capacity)))
+        }
         DataType::Time64(TimeUnit::Nanosecond) => {
             Ok(Box::new(Time64NanosecondBuilder::with_capacity(capacity)))
         }
+        DataType::Timestamp(TimeUnit::Millisecond, _) => Ok(Box::new(
+            TimestampMillisecondBuilder::with_capacity(capacity),
+        )),
         DataType::Timestamp(TimeUnit::Microsecond, _) => Ok(Box::new(
             TimestampMicrosecondBuilder::with_capacity(capacity),
+        )),
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => Ok(Box::new(
+            TimestampNanosecondBuilder::with_capacity(capacity),
         )),
         DataType::Decimal128(precision, scale) => {
             let builder = Decimal128BuilderWrapper::new(capacity, *precision, *scale)
@@ -351,12 +376,28 @@ fn create_list_builder_for_field(
             let values_builder = Date32Builder::with_capacity(capacity * 4);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
+        DataType::Time32(TimeUnit::Millisecond) => {
+            let values_builder = Time32MillisecondBuilder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Time64(TimeUnit::Microsecond) => {
+            let values_builder = Time64MicrosecondBuilder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
         DataType::Time64(TimeUnit::Nanosecond) => {
             let values_builder = Time64NanosecondBuilder::with_capacity(capacity * 4);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
+        DataType::Timestamp(TimeUnit::Millisecond, _) => {
+            let values_builder = TimestampMillisecondBuilder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
             let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4);
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+            let values_builder = TimestampNanosecondBuilder::with_capacity(capacity * 4);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
         DataType::Decimal128(precision, scale) => {
@@ -506,6 +547,24 @@ fn append_value_to_builder(
                 })?;
             append_date32_value(date_builder, value)?;
         }
+        DataType::Time32(TimeUnit::Millisecond) => {
+            let time_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Time32MillisecondBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Time32MillisecondBuilder".to_string(),
+                })?;
+            append_time32_millisecond_value(time_builder, value)?;
+        }
+        DataType::Time64(TimeUnit::Microsecond) => {
+            let time_builder = builder
+                .as_any_mut()
+                .downcast_mut::<Time64MicrosecondBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Time64MicrosecondBuilder".to_string(),
+                })?;
+            append_time64_microsecond_value(time_builder, value)?;
+        }
         DataType::Time64(TimeUnit::Nanosecond) => {
             let time_builder = builder
                 .as_any_mut()
@@ -513,7 +572,16 @@ fn append_value_to_builder(
                 .ok_or_else(|| Error::BuilderDowncastError {
                     expected: "Time64NanosecondBuilder".to_string(),
                 })?;
-            append_time64_value(time_builder, value)?;
+            append_time64_nanosecond_value(time_builder, value)?;
+        }
+        DataType::Timestamp(TimeUnit::Millisecond, _) => {
+            let timestamp_builder = builder
+                .as_any_mut()
+                .downcast_mut::<TimestampMillisecondBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "TimestampMillisecondBuilder".to_string(),
+                })?;
+            append_timestamp_millisecond_value(timestamp_builder, value)?;
         }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
             let timestamp_builder = builder
@@ -522,7 +590,16 @@ fn append_value_to_builder(
                 .ok_or_else(|| Error::BuilderDowncastError {
                     expected: "TimestampMicrosecondBuilder".to_string(),
                 })?;
-            append_timestamp_value(timestamp_builder, value)?;
+            append_timestamp_microsecond_value(timestamp_builder, value)?;
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+            let timestamp_builder = builder
+                .as_any_mut()
+                .downcast_mut::<TimestampNanosecondBuilder>()
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "TimestampNanosecondBuilder".to_string(),
+                })?;
+            append_timestamp_nanosecond_value(timestamp_builder, value)?;
         }
         DataType::Decimal128(_, _) => {
             let decimal_builder = builder
@@ -736,7 +813,61 @@ fn append_date32_value(builder: &mut Date32Builder, value: Option<&Value>) -> Re
     Ok(())
 }
 
-fn append_time64_value(builder: &mut Time64NanosecondBuilder, value: Option<&Value>) -> Result<()> {
+fn append_time32_millisecond_value(
+    builder: &mut Time32MillisecondBuilder,
+    value: Option<&Value>,
+) -> Result<()> {
+    match value {
+        Some(v) if v.is_null() => builder.append_null(),
+        Some(Value::String(time_str)) => {
+            if let Ok(time) = NaiveTime::parse_from_str(time_str, "%H:%M:%S%.f") {
+                let millis = i32::try_from(
+                    i64::from(time.num_seconds_from_midnight()) * 1_000
+                        + (time.nanosecond() / 1_000_000) as i64,
+                )
+                .map_err(|_| Error::InvalidTimeValue {
+                    value: time_str.to_string(),
+                })?;
+                builder.append_value(millis);
+            } else {
+                return Err(Error::InvalidTimeValue {
+                    value: time_str.to_string(),
+                });
+            }
+        }
+        Some(_) => builder.append_null(),
+        None => builder.append_null(),
+    }
+    Ok(())
+}
+
+fn append_time64_microsecond_value(
+    builder: &mut Time64MicrosecondBuilder,
+    value: Option<&Value>,
+) -> Result<()> {
+    match value {
+        Some(v) if v.is_null() => builder.append_null(),
+        Some(Value::String(time_str)) => {
+            if let Ok(time) = NaiveTime::parse_from_str(time_str, "%H:%M:%S%.f") {
+                let micros = i64::from(time.num_seconds_from_midnight()) * 1_000_000
+                    + (time.nanosecond() / 1_000) as i64;
+                builder.append_value(micros);
+            } else {
+                return Err(Error::InvalidTimeValue {
+                    value: time_str.to_string(),
+                });
+            }
+        }
+        Some(_) => builder.append_null(),
+        None => builder.append_null(),
+    }
+    Ok(())
+}
+
+fn append_time64_nanosecond_value(
+    builder: &mut Time64NanosecondBuilder,
+    value: Option<&Value>,
+) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(time_str)) => {
@@ -756,7 +887,36 @@ fn append_time64_value(builder: &mut Time64NanosecondBuilder, value: Option<&Val
     Ok(())
 }
 
-fn append_timestamp_value(
+pub fn append_timestamp_millisecond_value(
+    builder: &mut TimestampMillisecondBuilder,
+    value: Option<&Value>,
+) -> Result<()> {
+    match value {
+        Some(v) if v.is_null() => builder.append_null(),
+
+        Some(Value::String(timestamp_str)) => {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(timestamp_str) {
+                builder.append_value(dt.timestamp_millis());
+            } else if let Ok(naive_dt) =
+                NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
+            {
+                builder.append_value(Utc.from_utc_datetime(&naive_dt).timestamp_millis());
+            } else {
+                return Err(Error::InvalidTimestampValue {
+                    value: timestamp_str.to_string(),
+                });
+            }
+        }
+
+        Some(_) => builder.append_null(),
+
+        None => builder.append_null(),
+    }
+
+    Ok(())
+}
+
+fn append_timestamp_microsecond_value(
     builder: &mut TimestampMicrosecondBuilder,
     value: Option<&Value>,
 ) -> Result<()> {
@@ -766,9 +926,38 @@ fn append_timestamp_value(
             if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(timestamp_str) {
                 builder.append_value(dt.timestamp_micros());
             } else if let Ok(dt) =
-                chrono::NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
+                NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
             {
                 builder.append_value(dt.and_utc().timestamp_micros());
+            } else {
+                return Err(Error::InvalidTimestampValue {
+                    value: timestamp_str.to_string(),
+                });
+            }
+        }
+        Some(_) => builder.append_null(),
+        None => builder.append_null(),
+    }
+    Ok(())
+}
+
+pub fn append_timestamp_nanosecond_value(
+    builder: &mut TimestampNanosecondBuilder,
+    value: Option<&Value>,
+) -> Result<()> {
+    match value {
+        Some(v) if v.is_null() => builder.append_null(),
+        Some(Value::String(timestamp_str)) => {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(timestamp_str) {
+                builder.append_value(dt.timestamp_nanos_opt().ok_or_else(|| {
+                    Error::InvalidTimestampValue {
+                        value: timestamp_str.to_string(),
+                    }
+                })?);
+            } else if let Ok(naive_dt) =
+                NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
+            {
+                builder.append_value(Utc.from_utc_datetime(&naive_dt).timestamp_nanos());
             } else {
                 return Err(Error::InvalidTimestampValue {
                     value: timestamp_str.to_string(),
@@ -918,12 +1107,32 @@ fn append_null_to_list_builder(builder: &mut dyn ArrayBuilder) -> Result<()> {
         list_builder.append_null();
     } else if let Some(list_builder) = builder
         .as_any_mut()
+        .downcast_mut::<ListBuilder<Time32MillisecondBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Time64MicrosecondBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
         .downcast_mut::<ListBuilder<Time64NanosecondBuilder>>()
     {
         list_builder.append_null();
     } else if let Some(list_builder) = builder
         .as_any_mut()
+        .downcast_mut::<ListBuilder<TimestampMillisecondBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
         .downcast_mut::<ListBuilder<TimestampMicrosecondBuilder>>()
+    {
+        list_builder.append_null();
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<TimestampNanosecondBuilder>>()
     {
         list_builder.append_null();
     } else if let Some(list_builder) = builder
@@ -1044,10 +1253,34 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
         list_builder.append(true);
     } else if let Some(list_builder) = builder
         .as_any_mut()
+        .downcast_mut::<ListBuilder<Time32MillisecondBuilder>>()
+    {
+        for item in arr {
+            append_time32_millisecond_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<Time64MicrosecondBuilder>>()
+    {
+        for item in arr {
+            append_time64_microsecond_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
         .downcast_mut::<ListBuilder<Time64NanosecondBuilder>>()
     {
         for item in arr {
-            append_time64_value(list_builder.values(), Some(item))?;
+            append_time64_nanosecond_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<TimestampMillisecondBuilder>>()
+    {
+        for item in arr {
+            append_timestamp_millisecond_value(list_builder.values(), Some(item))?;
         }
         list_builder.append(true);
     } else if let Some(list_builder) = builder
@@ -1055,7 +1288,15 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
         .downcast_mut::<ListBuilder<TimestampMicrosecondBuilder>>()
     {
         for item in arr {
-            append_timestamp_value(list_builder.values(), Some(item))?;
+            append_timestamp_microsecond_value(list_builder.values(), Some(item))?;
+        }
+        list_builder.append(true);
+    } else if let Some(list_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<ListBuilder<TimestampNanosecondBuilder>>()
+    {
+        for item in arr {
+            append_timestamp_nanosecond_value(list_builder.values(), Some(item))?;
         }
         list_builder.append(true);
     } else if let Some(list_builder) = builder
@@ -1117,12 +1358,32 @@ fn append_null_to_any_builder(builder: &mut dyn ArrayBuilder) {
         date_builder.append_null();
     } else if let Some(time_builder) = builder
         .as_any_mut()
+        .downcast_mut::<Time32MillisecondBuilder>()
+    {
+        time_builder.append_null();
+    } else if let Some(time_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<Time64MicrosecondBuilder>()
+    {
+        time_builder.append_null();
+    } else if let Some(time_builder) = builder
+        .as_any_mut()
         .downcast_mut::<Time64NanosecondBuilder>()
     {
         time_builder.append_null();
     } else if let Some(timestamp_builder) = builder
         .as_any_mut()
+        .downcast_mut::<TimestampMillisecondBuilder>()
+    {
+        timestamp_builder.append_null();
+    } else if let Some(timestamp_builder) = builder
+        .as_any_mut()
         .downcast_mut::<TimestampMicrosecondBuilder>()
+    {
+        timestamp_builder.append_null();
+    } else if let Some(timestamp_builder) = builder
+        .as_any_mut()
+        .downcast_mut::<TimestampNanosecondBuilder>()
     {
         timestamp_builder.append_null();
     } else if let Some(decimal128_builder) =
@@ -1273,13 +1534,37 @@ fn append_to_struct_field_builder(
                 })?;
             append_date32_value(field_builder, value)?;
         }
+        DataType::Time32(TimeUnit::Millisecond) => {
+            let field_builder = builder
+                .field_builder::<Time32MillisecondBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Time32MillisecondBuilder".to_string(),
+                })?;
+            append_time32_millisecond_value(field_builder, value)?;
+        }
+        DataType::Time64(TimeUnit::Microsecond) => {
+            let field_builder = builder
+                .field_builder::<Time64MicrosecondBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "Time64MicrosecondBuilder".to_string(),
+                })?;
+            append_time64_microsecond_value(field_builder, value)?;
+        }
         DataType::Time64(TimeUnit::Nanosecond) => {
             let field_builder = builder
                 .field_builder::<Time64NanosecondBuilder>(field_index)
                 .ok_or_else(|| Error::BuilderDowncastError {
                     expected: "Time64NanosecondBuilder".to_string(),
                 })?;
-            append_time64_value(field_builder, value)?;
+            append_time64_nanosecond_value(field_builder, value)?;
+        }
+        DataType::Timestamp(TimeUnit::Millisecond, _) => {
+            let field_builder = builder
+                .field_builder::<TimestampMillisecondBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "TimestampMillisecondBuilder".to_string(),
+                })?;
+            append_timestamp_millisecond_value(field_builder, value)?;
         }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
             let field_builder = builder
@@ -1287,7 +1572,15 @@ fn append_to_struct_field_builder(
                 .ok_or_else(|| Error::BuilderDowncastError {
                     expected: "TimestampMicrosecondBuilder".to_string(),
                 })?;
-            append_timestamp_value(field_builder, value)?;
+            append_timestamp_microsecond_value(field_builder, value)?;
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+            let field_builder = builder
+                .field_builder::<TimestampNanosecondBuilder>(field_index)
+                .ok_or_else(|| Error::BuilderDowncastError {
+                    expected: "TimestampNanosecondBuilder".to_string(),
+                })?;
+            append_timestamp_nanosecond_value(field_builder, value)?;
         }
         DataType::Decimal128(_, _) => {
             let field_builder = builder

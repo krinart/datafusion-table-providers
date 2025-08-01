@@ -7,6 +7,8 @@ use secrecy::{ExposeSecret, SecretString};
 use snafu::{ResultExt, Snafu};
 use std::{collections::HashMap, fs, sync::Arc, time::Duration};
 
+use super::DbConnectionPool;
+use crate::sql::db_connection_pool::dbconnection::trinoconn::DEFAULT_POLL_WAIT_TIME_MS;
 use crate::{
     sql::db_connection_pool::{
         dbconnection::{trinoconn::TrinoConnection, AsyncDbConnection, DbConnection},
@@ -15,8 +17,6 @@ use crate::{
     util::{self, ns_lookup::verify_ns_lookup_and_tcp_connect},
     UnsupportedTypeAction,
 };
-use crate::sql::db_connection_pool::dbconnection::trinoconn::DEFAULT_POLL_WAIT_TIME_MS;
-use super::DbConnectionPool;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -128,7 +128,8 @@ impl TrinoConnectionPool {
         let headers = build_headers(&catalog, &schema, &user, &password, &bearer_token)?;
 
         let timeout_ms = parse_u64_param(&params, "timeout_ms", DEFAULT_TIMEOUT_MS)?;
-        let poll_wait_time = parse_u64_param(&params, "poll_wait_time_ms", DEFAULT_POLL_WAIT_TIME_MS)?;
+        let poll_wait_time =
+            parse_u64_param(&params, "poll_wait_time_ms", DEFAULT_POLL_WAIT_TIME_MS)?;
         let ssl_verification = parse_bool_param(&params, "ssl_verification", true)?;
 
         let mut client_builder = Client::builder()
@@ -214,9 +215,12 @@ impl TrinoConnectionPool {
 #[async_trait]
 impl DbConnectionPool<Arc<Client>, &'static str> for TrinoConnectionPool {
     async fn connect(&self) -> super::Result<Box<dyn DbConnection<Arc<Client>, &'static str>>> {
-        let connection =
-            TrinoConnection::new_with_config(self.client.clone(), self.base_url.clone(), self.poll_wait_time)
-                .with_unsupported_type_action(self.unsupported_type_action);
+        let connection = TrinoConnection::new_with_config(
+            self.client.clone(),
+            self.base_url.clone(),
+            self.poll_wait_time,
+        )
+        .with_unsupported_type_action(self.unsupported_type_action);
 
         Ok(Box::new(connection))
     }
