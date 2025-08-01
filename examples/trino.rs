@@ -23,8 +23,8 @@ async fn main() {
     // Create Trino connection parameters
     let trino_params = to_secret_map(HashMap::from([
         ("url".to_string(), "http://localhost:8080".to_string()),
-        ("catalog".to_string(), "tpch".to_string()),
-        ("schema".to_string(), "tiny".to_string()),
+        ("catalog".to_string(), "memory".to_string()),
+        ("schema".to_string(), "default".to_string()),
         ("user".to_string(), "test".to_string()),
     ]));
 
@@ -45,7 +45,7 @@ async fn main() {
     ctx.register_table(
         "region",
         table_factory
-            .table_provider(TableReference::bare("region"))
+            .table_provider(TableReference::bare("datetime_table"))
             .await
             .expect("failed to register table provider"),
     )

@@ -68,6 +68,7 @@ geo-types = "0.7.13"
 fundu = "2.0.1"
 reqwest = { version = "0.12.5", optional = true, features = ["json", "rustls-tls"] }
 regex = { version = "1.11.1", optional = true }
+chrono-tz = {  version = "0.8", optional = true }
 
 [dev-dependencies]
 anyhow = "1.0.86"
@@ -119,6 +120,7 @@ trino = [
   "dep:base64",
   "dep:regex",
   "dep:reqwest",
+  "dep:chrono-tz",
 ]
 
 [patch.crates-io]
