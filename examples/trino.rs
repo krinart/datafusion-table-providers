@@ -5,6 +5,7 @@ use datafusion::sql::TableReference;
 use datafusion_table_providers::sql::db_connection_pool::trinodbpool::TrinoConnectionPool;
 use datafusion_table_providers::trino::TrinoTableFactory;
 use datafusion_table_providers::util::secrets::to_secret_map;
+use datafusion_table_providers::UnsupportedTypeAction;
 
 /// This example demonstrates how to:
 /// 1. Create a Trino connection pool
@@ -23,8 +24,8 @@ async fn main() {
     // Create Trino connection parameters
     let trino_params = to_secret_map(HashMap::from([
         ("url".to_string(), "http://localhost:8080".to_string()),
-        ("catalog".to_string(), "memory".to_string()),
-        ("schema".to_string(), "default".to_string()),
+        ("catalog".to_string(), "tpch".to_string()),
+        ("schema".to_string(), "tiny".to_string()),
         ("user".to_string(), "test".to_string()),
     ]));
 
@@ -45,7 +46,7 @@ async fn main() {
     ctx.register_table(
         "region",
         table_factory
-            .table_provider(TableReference::bare("datetime_table"))
+            .table_provider(TableReference::bare("region"))
             .await
             .expect("failed to register table provider"),
     )

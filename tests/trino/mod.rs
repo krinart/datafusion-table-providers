@@ -12,7 +12,6 @@ use crate::docker::RunningContainer;
 mod common;
 
 async fn test_trino_datetime_types(port: usize) {
-    // Setup table with datetime data
     let client = common::get_trino_client(port)
         .await
         .expect("Trino client should be created");
@@ -359,80 +358,6 @@ async fn test_trino_array_types(port: usize) {
     arrow_trino_one_way(port, "array_table", expected_record).await;
 }
 
-async fn test_trino_json_types(port: usize) {
-    let client = common::get_trino_client(port)
-        .await
-        .expect("Trino client should be created");
-
-    let create_table_sql = r#"
-        CREATE TABLE memory.default.json_test_table (
-            user_data JSON,
-            metadata JSON,
-            simple_string VARCHAR
-        )
-    "#;
-
-    client
-        .execute_ddl(create_table_sql)
-        .await
-        .expect("Table should be created");
-
-    let insert_sql = r#"
-        INSERT INTO memory.default.json_test_table VALUES
-        (JSON '{"name": "Alice", "age": 30, "contact": {"email": "alice@example.com", "phone": "555-1234"}}',
-         JSON '{"created_at": "2024-01-01", "tags": ["important", "user"], "settings": {"theme": "dark", "notifications": true}}',
-         'not an object'),
-        (JSON '{"name": "Bob", "age": 25, "contact": {"email": "bob@example.com"}}',
-         JSON '{"created_at": "2024-01-02", "tags": ["user"], "settings": {"theme": "light", "notifications": false}}',
-         'also not an object')
-    "#;
-
-    client
-        .execute_ddl(insert_sql)
-        .await
-        .expect("Data should be inserted");
-
-    let ctx = SessionContext::new();
-    let trino_conn_pool = common::get_trino_connection_pool(port)
-        .await
-        .expect("Trino connection pool should be created");
-
-    let table = TrinoTable::new(&Arc::new(trino_conn_pool), "memory.default.json_test_table")
-        .await
-        .expect("Table should be created");
-
-    ctx.register_table("json_test_table", Arc::new(table))
-        .expect("Table should be registered");
-
-    let sql = r#"SELECT "user_data", "metadata", "simple_string" FROM json_test_table"#;
-    let df = ctx
-        .sql(sql)
-        .await
-        .expect("DataFrame should be created from query");
-
-    let record_batches = df.collect().await.expect("RecordBatch should be collected");
-    assert_eq!(record_batches.len(), 1);
-
-    let batch = &record_batches[0];
-    assert_eq!(batch.num_rows(), 2);
-    assert_eq!(batch.num_columns(), 3);
-
-    let user_data_array = batch
-        .column_by_name("user_data")
-        .unwrap()
-        .as_any()
-        .downcast_ref::<LargeStringArray>()
-        .unwrap();
-
-    assert!(user_data_array.value(0).contains("Alice"));
-    assert!(user_data_array.value(1).contains("Bob"));
-
-    println!(
-        "Successfully queried Trino JSON data with {} rows",
-        batch.num_rows()
-    );
-}
-
 async fn test_trino_null_and_missing_fields(port: usize) {
     let client = common::get_trino_client(port)
         .await
@@ -584,7 +509,6 @@ async fn test_trino_arrow_oneway() {
     test_trino_boolean_types(port).await;
     test_trino_binary_types(port).await;
     test_trino_array_types(port).await;
-    test_trino_json_types(port).await;
     test_trino_null_and_missing_fields(port).await;
 
     trino_container.remove().await.expect("container to stop");

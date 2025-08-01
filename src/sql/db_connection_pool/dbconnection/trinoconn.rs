@@ -8,7 +8,6 @@ use crate::sql::arrow_sql_gen::trino::{
     arrow::{rows_to_arrow, TrinoColumn},
     schema::trino_data_type_to_arrow_type,
 };
-use crate::util::handle_unsupported_type_error;
 use crate::UnsupportedTypeAction;
 use arrow::datatypes::Field;
 use arrow::datatypes::Schema;
@@ -142,14 +141,10 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                 };
 
                 let Ok(arrow_type) = trino_data_type_to_arrow_type(data_type) else {
-                    handle_unsupported_type_error(
-                        self.unsupported_type_action,
-                        super::Error::UnsupportedDataType {
-                            data_type: data_type.to_string(),
-                            field_name: column_name.to_string(),
-                        },
-                    )?;
-                    continue;
+                    return Err(super::Error::UnsupportedDataType {
+                        data_type: data_type.to_string(),
+                        field_name: column_name.to_string(),
+                    });
                 };
 
                 fields.push(Field::new(column_name, arrow_type, nullable));
