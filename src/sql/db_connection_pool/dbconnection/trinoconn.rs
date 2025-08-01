@@ -100,8 +100,6 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 
         let mut fields = Vec::new();
 
-        // println!("data rows: {:?}", data_rows);
-
         for row_data in query_result.data {
             if row_data.len() >= 2 {
                 let column_name =
