@@ -2300,6 +2300,7 @@ mod tests {
     #[test]
     fn test_time() {
         let columns = create_test_columns(vec![
+            ("col0", "time(0)"),
             ("col1", "time(1)"),
             ("col2", "time(2)"),
             ("col3", "time(3)"),
@@ -2312,6 +2313,7 @@ mod tests {
         ]);
 
         let row = vec![
+            json!("14:30:45"),
             json!("14:30:45.1"),
             json!("14:30:45.12"),
             json!("14:30:45.123"),
@@ -2325,13 +2327,16 @@ mod tests {
 
         let result = rows_to_arrow(&[row], &columns).unwrap();
 
-        // Expected values
         let t = |s| NaiveTime::parse_from_str(s, "%H:%M:%S%.f").unwrap();
 
-        // Millisecond precision
         assert_time32_millisecond_array(
             &result,
             0,
+            vec![t("14:30:45").num_seconds_from_midnight() as i32 * 1000],
+        );
+        assert_time32_millisecond_array(
+            &result,
+            1,
             vec![
                 t("14:30:45.1").num_seconds_from_midnight() as i32 * 1000
                     + (t("14:30:45.1").nanosecond() / 1_000_000) as i32,
@@ -2339,7 +2344,7 @@ mod tests {
         );
         assert_time32_millisecond_array(
             &result,
-            1,
+            2,
             vec![
                 t("14:30:45.12").num_seconds_from_midnight() as i32 * 1000
                     + (t("14:30:45.12").nanosecond() / 1_000_000) as i32,
@@ -2347,7 +2352,7 @@ mod tests {
         );
         assert_time32_millisecond_array(
             &result,
-            2,
+            3,
             vec![
                 t("14:30:45.123").num_seconds_from_midnight() as i32 * 1000
                     + (t("14:30:45.123").nanosecond() / 1_000_000) as i32,
@@ -2357,7 +2362,7 @@ mod tests {
         // Microsecond precision
         assert_time64_microsecond_array(
             &result,
-            3,
+            4,
             vec![
                 t("14:30:45.1234").num_seconds_from_midnight() as i64 * 1_000_000
                     + (t("14:30:45.1234").nanosecond() / 1_000) as i64,
@@ -2365,7 +2370,7 @@ mod tests {
         );
         assert_time64_microsecond_array(
             &result,
-            4,
+            5,
             vec![
                 t("14:30:45.12345").num_seconds_from_midnight() as i64 * 1_000_000
                     + (t("14:30:45.12345").nanosecond() / 1_000) as i64,
@@ -2373,7 +2378,7 @@ mod tests {
         );
         assert_time64_microsecond_array(
             &result,
-            5,
+            6,
             vec![
                 t("14:30:45.123456").num_seconds_from_midnight() as i64 * 1_000_000
                     + (t("14:30:45.123456").nanosecond() / 1_000) as i64,
@@ -2383,7 +2388,7 @@ mod tests {
         // Nanosecond precision
         assert_time64_nanosecond_array(
             &result,
-            6,
+            7,
             vec![
                 t("14:30:45.1234567").num_seconds_from_midnight() as i64 * 1_000_000_000
                     + t("14:30:45.1234567").nanosecond() as i64,
@@ -2391,7 +2396,7 @@ mod tests {
         );
         assert_time64_nanosecond_array(
             &result,
-            7,
+            8,
             vec![
                 t("14:30:45.12345678").num_seconds_from_midnight() as i64 * 1_000_000_000
                     + t("14:30:45.12345678").nanosecond() as i64,
@@ -2399,7 +2404,7 @@ mod tests {
         );
         assert_time64_nanosecond_array(
             &result,
-            8,
+            9,
             vec![
                 t("14:30:45.123456789").num_seconds_from_midnight() as i64 * 1_000_000_000
                     + t("14:30:45.123456789").nanosecond() as i64,
@@ -2410,6 +2415,7 @@ mod tests {
     #[test]
     fn test_timestamp() {
         let columns = create_test_columns(vec![
+            ("col0", "timestamp(0)"),
             ("col1", "timestamp(1)"),
             ("col2", "timestamp(2)"),
             ("col3", "timestamp(3)"),
@@ -2422,6 +2428,7 @@ mod tests {
         ]);
 
         let row = vec![
+            json!("2023-12-25T14:30:45Z"),
             json!("2023-12-25T14:30:45.1Z"),
             json!("2023-12-25T14:30:45.12Z"),
             json!("2023-12-25T14:30:45.123Z"),
@@ -2445,41 +2452,47 @@ mod tests {
         assert_timestamp_millisecond_array(
             &result,
             0,
-            vec![ts("2023-12-25T14:30:45.1Z") / 1_000_000],
+            vec![ts("2023-12-25T14:30:45Z") / 1_000_000],
         );
         assert_timestamp_millisecond_array(
             &result,
             1,
-            vec![ts("2023-12-25T14:30:45.12Z") / 1_000_000],
+            vec![ts("2023-12-25T14:30:45.1Z") / 1_000_000],
         );
         assert_timestamp_millisecond_array(
             &result,
             2,
+            vec![ts("2023-12-25T14:30:45.12Z") / 1_000_000],
+        );
+        assert_timestamp_millisecond_array(
+            &result,
+            3,
             vec![ts("2023-12-25T14:30:45.123Z") / 1_000_000],
         );
         assert_timestamp_microsecond_array(
             &result,
-            3,
+            4,
             vec![ts("2023-12-25T14:30:45.1234Z") / 1_000],
         );
         assert_timestamp_microsecond_array(
             &result,
-            4,
+            5,
             vec![ts("2023-12-25T14:30:45.12345Z") / 1_000],
         );
         assert_timestamp_microsecond_array(
             &result,
-            5,
+            6,
             vec![ts("2023-12-25T14:30:45.123456Z") / 1_000],
         );
-        assert_timestamp_nanosecond_array(&result, 6, vec![ts("2023-12-25T14:30:45.1234567Z")]);
-        assert_timestamp_nanosecond_array(&result, 7, vec![ts("2023-12-25T14:30:45.12345678Z")]);
-        assert_timestamp_nanosecond_array(&result, 8, vec![ts("2023-12-25T14:30:45.123456789Z")]);
+        assert_timestamp_nanosecond_array(&result, 7, vec![ts("2023-12-25T14:30:45.1234567Z")]);
+        assert_timestamp_nanosecond_array(&result, 8, vec![ts("2023-12-25T14:30:45.12345678Z")]);
+        assert_timestamp_nanosecond_array(&result, 9, vec![ts("2023-12-25T14:30:45.123456789Z")]);
     }
 
     #[test]
     fn test_timestamp_with_timezone() {
         let columns = create_test_columns(vec![
+            ("col0", "timestamp(0) with time zone"),
             ("col1", "timestamp(1) with time zone"),
             ("col2", "timestamp(2) with time zone"),
             ("col3", "timestamp(3) with time zone"),
@@ -2492,6 +2505,7 @@ mod tests {
         ]);
 
         let row = vec![
+            json!("2023-12-25T14:30:45Z"),
             json!("2023-12-25T14:30:45.1Z"),
             json!("2023-12-25T14:30:45.12Z"),
             json!("2023-12-25T14:30:45.123Z"),
@@ -2526,37 +2540,38 @@ mod tests {
                 .unwrap()
         };
 
-        assert_timestamp_millisecond_array(&result, 0, vec![ts_millis("2023-12-25T14:30:45.1Z")]);
-        assert_timestamp_millisecond_array(&result, 1, vec![ts_millis("2023-12-25T14:30:45.12Z")]);
-        assert_timestamp_millisecond_array(&result, 2, vec![ts_millis("2023-12-25T14:30:45.123Z")]);
+        assert_timestamp_millisecond_array(&result, 0, vec![ts_millis("2023-12-25T14:30:45Z")]);
+        assert_timestamp_millisecond_array(&result, 1, vec![ts_millis("2023-12-25T14:30:45.1Z")]);
+        assert_timestamp_millisecond_array(&result, 2, vec![ts_millis("2023-12-25T14:30:45.12Z")]);
+        assert_timestamp_millisecond_array(&result, 3, vec![ts_millis("2023-12-25T14:30:45.123Z")]);
         assert_timestamp_microsecond_array(
             &result,
-            3,
+            4,
             vec![ts_micros("2023-12-25T14:30:45.1234Z")],
         );
         assert_timestamp_microsecond_array(
             &result,
-            4,
+            5,
             vec![ts_micros("2023-12-25T14:30:45.12345Z")],
         );
         assert_timestamp_microsecond_array(
             &result,
-            5,
+            6,
             vec![ts_micros("2023-12-25T14:30:45.123456Z")],
         );
         assert_timestamp_nanosecond_array(
             &result,
-            6,
+            7,
             vec![ts_nanos("2023-12-25T14:30:45.1234567Z")],
         );
         assert_timestamp_nanosecond_array(
             &result,
-            7,
+            8,
             vec![ts_nanos("2023-12-25T14:30:45.12345678Z")],
         );
         assert_timestamp_nanosecond_array(
             &result,
-            8,
+            9,
             vec![ts_nanos("2023-12-25T14:30:45.123456789Z")],
         );
     }

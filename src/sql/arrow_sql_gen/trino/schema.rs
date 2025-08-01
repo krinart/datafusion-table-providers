@@ -287,6 +287,10 @@ mod tests {
     #[test]
     fn test_time() {
         assert_eq!(
+            trino_data_type_to_arrow_type("time(0)").unwrap(),
+            DataType::Time32(TimeUnit::Millisecond)
+        );
+        assert_eq!(
             trino_data_type_to_arrow_type("time(1)").unwrap(),
             DataType::Time32(TimeUnit::Millisecond)
         );
@@ -329,6 +333,10 @@ mod tests {
     #[test]
     fn test_timestamp() {
         assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(0)").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, None)
+        );
+        assert_eq!(
             trino_data_type_to_arrow_type("timestamp(1)").unwrap(),
             DataType::Timestamp(TimeUnit::Millisecond, None)
         );
@@ -370,6 +378,10 @@ mod tests {
 
     #[test]
     fn test_timestamp_with_timezone() {
+        assert_eq!(
+            trino_data_type_to_arrow_type("timestamp(0) with time zone").unwrap(),
+            DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()))
+        );
         assert_eq!(
             trino_data_type_to_arrow_type("timestamp(1) with time zone").unwrap(),
             DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()))
