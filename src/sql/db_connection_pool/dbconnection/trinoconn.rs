@@ -217,7 +217,6 @@ impl TrinoConnection {
     }
 
     async fn execute_query(&self, sql: &str) -> Result<TrinoQueryResult, Error> {
-
         let url = format!("{}/v1/statement", self.base_url);
 
         // Step 1: Submit the query
