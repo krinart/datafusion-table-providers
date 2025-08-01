@@ -17,9 +17,11 @@ use base64::Engine;
 use bigdecimal::BigDecimal;
 use bigdecimal::ToPrimitive;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
+use chrono_tz::Tz;
 use serde_json::Value;
 use snafu::ResultExt;
 use std::any::Any;
+use std::str::FromStr;
 use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, Clone)]
@@ -896,53 +898,45 @@ pub fn append_timestamp_millisecond_value(
         Some(v) if v.is_null() => builder.append_null(),
 
         Some(Value::String(timestamp_str)) => {
-            let timestamp_str = timestamp_str.replace(" UTC", "Z");
+            let ts = timestamp_str.trim();
 
-            if let Ok(dt) = DateTime::parse_from_rfc3339(&timestamp_str) {
-                builder.append_value(dt.timestamp_millis());
-            } else if let Ok(naive_dt) =
-                NaiveDateTime::parse_from_str(&timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
-            {
-                builder.append_value(Utc.from_utc_datetime(&naive_dt).timestamp_millis());
+            if let Some(utc_millis) = parse_timestamp_with_timezone(ts)? {
+                builder.append_value(utc_millis);
             } else {
                 return Err(Error::InvalidTimestampValue {
-                    value: timestamp_str.to_string(),
+                    value: ts.to_string(),
                 });
             }
         }
 
-        Some(_) => builder.append_null(),
-
-        None => builder.append_null(),
+        Some(_) | None => builder.append_null(),
     }
 
     Ok(())
 }
 
-fn append_timestamp_microsecond_value(
+pub fn append_timestamp_microsecond_value(
     builder: &mut TimestampMicrosecondBuilder,
     value: Option<&Value>,
 ) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
-        Some(Value::String(timestamp_str)) => {
-            let timestamp_str = timestamp_str.replace(" UTC", "Z");
 
-            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&timestamp_str) {
-                builder.append_value(dt.timestamp_micros());
-            } else if let Ok(dt) =
-                NaiveDateTime::parse_from_str(&timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
-            {
-                builder.append_value(dt.and_utc().timestamp_micros());
+        Some(Value::String(timestamp_str)) => {
+            let ts = timestamp_str.trim();
+
+            if let Some(utc_dt) = parse_timestamp_to_utc_datetime(ts)? {
+                builder.append_value(utc_dt.timestamp_micros());
             } else {
                 return Err(Error::InvalidTimestampValue {
-                    value: timestamp_str.to_string(),
+                    value: ts.to_string(),
                 });
             }
         }
-        Some(_) => builder.append_null(),
-        None => builder.append_null(),
+
+        Some(_) | None => builder.append_null(),
     }
+
     Ok(())
 }
 
@@ -952,29 +946,120 @@ pub fn append_timestamp_nanosecond_value(
 ) -> Result<()> {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
-        Some(Value::String(timestamp_str)) => {
-            let timestamp_str = timestamp_str.replace(" UTC", "Z");
 
-            if let Ok(dt) = DateTime::parse_from_rfc3339(&timestamp_str) {
-                builder.append_value(dt.timestamp_nanos_opt().ok_or_else(|| {
-                    Error::InvalidTimestampValue {
-                        value: timestamp_str.to_string(),
-                    }
-                })?);
-            } else if let Ok(naive_dt) =
-                NaiveDateTime::parse_from_str(&timestamp_str, "%Y-%m-%d %H:%M:%S%.f")
-            {
-                builder.append_value(Utc.from_utc_datetime(&naive_dt).timestamp_nanos());
+        Some(Value::String(timestamp_str)) => {
+            let ts = timestamp_str.trim();
+
+            if let Some(utc_dt) = parse_timestamp_to_utc_datetime(ts)? {
+                let nanos =
+                    utc_dt
+                        .timestamp_nanos_opt()
+                        .ok_or_else(|| Error::InvalidTimestampValue {
+                            value: ts.to_string(),
+                        })?;
+                builder.append_value(nanos);
             } else {
                 return Err(Error::InvalidTimestampValue {
-                    value: timestamp_str.to_string(),
+                    value: ts.to_string(),
                 });
             }
         }
-        Some(_) => builder.append_null(),
-        None => builder.append_null(),
+
+        Some(_) | None => builder.append_null(),
     }
+
     Ok(())
+}
+
+fn parse_timestamp_with_timezone(ts: &str) -> Result<Option<i64>> {
+    if let Some(utc_dt) = parse_timestamp_to_utc_datetime(ts)? {
+        Ok(Some(utc_dt.timestamp_millis()))
+    } else {
+        Ok(None)
+    }
+}
+
+fn parse_timestamp_to_utc_datetime(ts: &str) -> Result<Option<DateTime<Utc>>> {
+    // 1. Try parsing with IANA timezone (e.g., "2023-12-25 15:30:00 America/New_York")
+    if let Some((datetime_part, tz_part)) = ts.rsplit_once(' ') {
+        if let Ok(tz) = Tz::from_str(tz_part) {
+            // Parse the datetime part without timezone
+            if let Ok(naive_dt) =
+                NaiveDateTime::parse_from_str(datetime_part, "%Y-%m-%d %H:%M:%S%.f")
+            {
+                // Convert naive datetime to the specified timezone, then to UTC
+                let dt_with_tz = tz.from_local_datetime(&naive_dt).single().ok_or_else(|| {
+                    Error::InvalidTimestampValue {
+                        value: ts.to_string(),
+                    }
+                })?;
+                let utc_dt = dt_with_tz.with_timezone(&Utc);
+                return Ok(Some(utc_dt));
+            }
+        }
+    }
+
+    // 2. Handle special case: normalize " UTC" to "+00:00"
+    let normalized_ts = if ts.ends_with(" UTC") {
+        ts.replace(" UTC", " +00:00")
+    } else {
+        ts.to_string()
+    };
+
+    // 3. Try parsing with numeric timezone offset (e.g., "+05:30", "-08:00")
+    if let Ok(dt_with_tz) = DateTime::parse_from_str(&normalized_ts, "%Y-%m-%d %H:%M:%S%.f %z") {
+        let utc_dt = dt_with_tz.with_timezone(&Utc);
+        return Ok(Some(utc_dt));
+    }
+
+    // 4. Try parsing with timezone abbreviation (e.g., "PST", "EST")
+    if let Some((datetime_part, tz_part)) = ts.rsplit_once(' ') {
+        if let Some(tz) = parse_timezone_abbreviation(tz_part) {
+            if let Ok(naive_dt) =
+                NaiveDateTime::parse_from_str(datetime_part, "%Y-%m-%d %H:%M:%S%.f")
+            {
+                let dt_with_tz = tz.from_local_datetime(&naive_dt).single().ok_or_else(|| {
+                    Error::InvalidTimestampValue {
+                        value: ts.to_string(),
+                    }
+                })?;
+                let utc_dt = dt_with_tz.with_timezone(&Utc);
+                return Ok(Some(utc_dt));
+            }
+        }
+    }
+
+    // 5. Fallback: naive datetime (assume UTC)
+    if let Ok(naive_dt) = NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S%.f") {
+        let utc_dt = Utc.from_utc_datetime(&naive_dt);
+        return Ok(Some(utc_dt));
+    }
+
+    // 6. Try ISO 8601 format with timezone
+    if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+        let utc_dt = dt.with_timezone(&Utc);
+        return Ok(Some(utc_dt));
+    }
+
+    Ok(None)
+}
+
+fn parse_timezone_abbreviation(tz_abbr: &str) -> Option<Tz> {
+    // Map common timezone abbreviations to IANA identifiers
+    match tz_abbr {
+        "PST" | "PDT" => Some(Tz::America__Los_Angeles),
+        "MST" | "MDT" => Some(Tz::America__Denver),
+        "CST" | "CDT" => Some(Tz::America__Chicago),
+        "EST" | "EDT" => Some(Tz::America__New_York),
+        "GMT" | "UTC" => Some(Tz::UTC),
+        "JST" => Some(Tz::Asia__Tokyo),
+        "CET" | "CEST" => Some(Tz::Europe__Berlin),
+        "BST" => Some(Tz::Europe__London),
+        "IST" => Some(Tz::Asia__Kolkata),
+        "AEST" | "AEDT" => Some(Tz::Australia__Sydney),
+        "HST" => Some(Tz::Pacific__Honolulu),
+        _ => None,
+    }
 }
 
 fn append_decimal128_value(
@@ -1678,7 +1763,7 @@ fn append_struct_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use arrow::array::*;
     use serde_json::{json, Value};
 
@@ -2509,14 +2594,14 @@ mod tests {
         let row = vec![
             json!("2023-12-25 14:30:45 UTC"),
             json!("2023-12-25 14:30:45.1 UTC"),
-            json!("2023-12-25 14:30:45.12 UTC"),
-            json!("2023-12-25 14:30:45.123 UTC"),
+            json!("2023-12-25 15:30:45.12 +01:00"),
+            json!("2023-12-25 06:30:45.123 America/Los_Angeles"),
             json!("2023-12-25 14:30:45.1234 UTC"),
-            json!("2023-12-25 14:30:45.12345 UTC"),
-            json!("2023-12-25 14:30:45.123456 UTC"),
+            json!("2023-12-25 16:30:45.12345 +02:00"),
+            json!("2023-12-25 09:30:45.123456 America/New_York"),
             json!("2023-12-25 14:30:45.1234567 UTC"),
-            json!("2023-12-25 14:30:45.12345678 UTC"),
-            json!("2023-12-25 14:30:45.123456789 UTC"),
+            json!("2023-12-25 11:30:45.12345678 -03:00"),
+            json!("2023-12-25 15:30:45.123456789 Europe/Amsterdam"),
         ];
 
         let result = rows_to_arrow(&[row], &columns).unwrap();
