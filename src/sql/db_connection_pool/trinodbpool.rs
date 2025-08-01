@@ -376,15 +376,21 @@ fn parse_bool_param(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockito::{Server};
+    use mockito::Server;
     use secrecy::SecretString;
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
     fn create_basic_params() -> HashMap<String, SecretString> {
         let mut params = HashMap::new();
-        params.insert("catalog".to_string(), SecretString::new("test_catalog".into()));
-        params.insert("schema".to_string(), SecretString::new("test_schema".into()));
+        params.insert(
+            "catalog".to_string(),
+            SecretString::new("test_catalog".into()),
+        );
+        params.insert(
+            "schema".to_string(),
+            SecretString::new("test_schema".into()),
+        );
         params
     }
 
@@ -443,7 +449,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
 
         let mut params = create_basic_params();
         params.insert("url".to_string(), SecretString::new(server.url().into()));
-        params.insert("bearer_token".to_string(), SecretString::new("test-token-123".into()));
+        params.insert(
+            "bearer_token".to_string(),
+            SecretString::new("test-token-123".into()),
+        );
         params.insert("user".to_string(), SecretString::new("testuser".into()));
 
         let pool = TrinoConnectionPool::new(params).await;
@@ -469,10 +478,14 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
 
         let mut params = create_basic_params();
         params.insert("host".to_string(), SecretString::new(host.into()));
-        params.insert("port".to_string(), SecretString::new(port.to_string().into()));
+        params.insert(
+            "port".to_string(),
+            SecretString::new(port.to_string().into()),
+        );
         params.insert("user".to_string(), SecretString::new("testuser".into()));
 
-        let pool = TrinoConnectionPool::new(params).await
+        let pool = TrinoConnectionPool::new(params)
+            .await
             .expect("Failed to create TrinoConnectionPool");
 
         mock.assert_async().await;
@@ -492,8 +505,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
 
         let mut params = create_basic_params();
         params.insert("url".to_string(), SecretString::new(server.url().into()));
-        params.insert("identity_pem_path".to_string(),
-                      SecretString::new(pem_file.path().to_string_lossy().into()));
+        params.insert(
+            "identity_pem_path".to_string(),
+            SecretString::new(pem_file.path().to_string_lossy().into()),
+        );
 
         // Note: This test may fail in practice due to actual TLS validation
         // In a real test environment, you'd want to use a proper test certificate
@@ -505,7 +520,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
     #[tokio::test]
     async fn test_new_missing_catalog() {
         let mut params = HashMap::new();
-        params.insert("url".to_string(), SecretString::new("http://localhost:8080".into()));
+        params.insert(
+            "url".to_string(),
+            SecretString::new("http://localhost:8080".into()),
+        );
 
         let result = TrinoConnectionPool::new(params).await;
         assert!(result.is_err());
@@ -601,10 +619,16 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
     #[tokio::test]
     async fn test_multiple_auth_methods_error() {
         let mut params = create_basic_params();
-        params.insert("url".to_string(), SecretString::new("http://localhost:8080".into()));
+        params.insert(
+            "url".to_string(),
+            SecretString::new("http://localhost:8080".into()),
+        );
         params.insert("user".to_string(), SecretString::new("testuser".into()));
         params.insert("password".to_string(), SecretString::new("testpass".into()));
-        params.insert("bearer_token".to_string(), SecretString::new("token123".into()));
+        params.insert(
+            "bearer_token".to_string(),
+            SecretString::new("token123".into()),
+        );
 
         let result = TrinoConnectionPool::new(params).await;
         assert!(result.is_err());
@@ -692,16 +716,25 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
         let mut params = HashMap::new();
         params.insert("timeout".to_string(), SecretString::new("120".into()));
         params.insert("port".to_string(), SecretString::new("9080".into()));
-        params.insert("ssl_verification".to_string(), SecretString::new("false".into()));
+        params.insert(
+            "ssl_verification".to_string(),
+            SecretString::new("false".into()),
+        );
 
         assert_eq!(parse_u64_param(&params, "timeout", 300).unwrap(), 120);
         assert_eq!(parse_u16_param(&params, "port", 8080).unwrap(), 9080);
-        assert_eq!(parse_bool_param(&params, "ssl_verification", true).unwrap(), false);
+        assert_eq!(
+            parse_bool_param(&params, "ssl_verification", true).unwrap(),
+            false
+        );
 
         // Test defaults
         assert_eq!(parse_u64_param(&params, "nonexistent", 300).unwrap(), 300);
         assert_eq!(parse_u16_param(&params, "nonexistent", 8080).unwrap(), 8080);
-        assert_eq!(parse_bool_param(&params, "nonexistent", true).unwrap(), true);
+        assert_eq!(
+            parse_bool_param(&params, "nonexistent", true).unwrap(),
+            true
+        );
     }
 
     #[test]
@@ -723,7 +756,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
         assert!(validate_auth(&params, &user, &password).is_ok());
 
         let password = None;
-        params.insert("bearer_token".to_string(), SecretString::new("token".into()));
+        params.insert(
+            "bearer_token".to_string(),
+            SecretString::new("token".into()),
+        );
         assert!(validate_auth(&params, &user, &password).is_ok());
 
         // Test invalid case - multiple auth methods
@@ -734,7 +770,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
         // User is required
         let user = None;
         let password = None;
-        params.insert("bearer_token".to_string(), SecretString::new("token".into()));
+        params.insert(
+            "bearer_token".to_string(),
+            SecretString::new("token".into()),
+        );
         assert!(validate_auth(&params, &user, &password).is_err());
     }
 
@@ -742,7 +781,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
     fn test_get_catalog_and_schema() {
         let mut params = HashMap::new();
         params.insert("catalog".to_string(), SecretString::new("test_cat".into()));
-        params.insert("schema".to_string(), SecretString::new("test_schema".into()));
+        params.insert(
+            "schema".to_string(),
+            SecretString::new("test_schema".into()),
+        );
 
         let (catalog, schema) = get_catalog_and_schema(&params).unwrap();
         assert_eq!(catalog, "test_cat");
@@ -792,7 +834,10 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
     #[test]
     fn test_build_base_url_with_trailing_slash() {
         let mut params = HashMap::new();
-        params.insert("url".to_string(), SecretString::new("http://localhost:8080/".into()));
+        params.insert(
+            "url".to_string(),
+            SecretString::new("http://localhost:8080/".into()),
+        );
 
         let url = build_base_url(&params).unwrap();
         assert_eq!(url, "http://localhost:8080");
