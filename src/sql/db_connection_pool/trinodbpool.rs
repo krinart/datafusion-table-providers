@@ -110,6 +110,7 @@ impl TrinoConnectionPool {
     ///   * `password` - The password for authentication (optional)
     ///   * `timeout` - Request timeout in seconds (optional, defaults to 300)
     ///   * `ssl_verification` - Whether to verify SSL certificates (optional, defaults to true)
+    ///   * `identity_pem_path` - Path to a PEM file containing both the client certificate and private key for mTLS authentication.
     ///
     /// # Errors
     ///
