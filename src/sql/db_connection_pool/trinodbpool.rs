@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+use reqwest::header::{HeaderValue, AUTHORIZATION};
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretBox, SecretString};
 use serde_json::Value;
@@ -90,6 +93,7 @@ impl TrinoConnectionPool {
     ///   * `catalog` - The default catalog to use (required)
     ///   * `schema` - The default schema to use (optional, defaults to "default")
     ///   * `user` - The user to authenticate with (optional)
+    ///   * `password` - The password for authentication (optional)
     ///   * `timeout` - Request timeout in seconds (optional, defaults to 300)
     ///   * `ssl_verification` - Whether to verify SSL certificates (optional, defaults to true)
     ///
@@ -186,15 +190,21 @@ impl TrinoConnectionPool {
             headers.insert("X-Trino-User", user.parse().unwrap());
         }
 
+        // Add basic auth if password is provided
+        if let (Some(ref user), Some(ref password)) = (&user, &password) {
+            let credentials = format!("{}:{}", user, password.expose_secret());
+            let encoded = BASE64.encode(credentials);
+
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
+            );
+        }
+
         let mut client_builder = Client::builder()
             .default_headers(headers)
             .timeout(Duration::from_secs(timeout_seconds))
             .danger_accept_invalid_certs(!ssl_verification);
-
-        // Add basic auth if password is provided
-        // if let (Some(ref user), Some(ref password)) = (&user, &password) {
-        //     client_builder = client_builder.basic_auth(user, Some(password.expose_secret()));
-        // }
 
         let client = client_builder
             .build()

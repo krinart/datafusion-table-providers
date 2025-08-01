@@ -11,6 +11,8 @@ use arrow::{
     datatypes::{i256, DataType, Date32Type, Field, Fields, Schema, TimeUnit},
 };
 use arrow_schema::ArrowError;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use bigdecimal::BigDecimal;
 use bigdecimal::ToPrimitive;
 use chrono::{NaiveDate, NaiveTime, Timelike};
@@ -716,7 +718,7 @@ fn append_binary_value(builder: &mut BinaryBuilder, value: Option<&Value>) -> Re
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(s)) => {
             // Try to decode as base64, fallback to raw bytes
-            if let Ok(bytes) = base64::decode(s) {
+            if let Ok(bytes) = BASE64.decode(s) {
                 builder.append_value(bytes);
             } else {
                 builder.append_value(s.as_bytes());
@@ -2074,7 +2076,7 @@ mod tests {
     fn test_binary_data() {
         let columns = create_test_columns(vec![("binary_col", "varbinary")]);
 
-        let base64_data = base64::encode(b"hello world");
+        let base64_data = BASE64.encode(b"hello world");
         let rows = vec![vec![json!(base64_data)], vec![json!("plain text")]];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
