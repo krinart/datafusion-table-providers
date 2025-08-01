@@ -1,14 +1,10 @@
 use crate::docker::{ContainerRunnerBuilder, RunningContainer};
 use bollard::secret::HealthConfig;
-use datafusion_table_providers::sql::arrow_sql_gen::trino::arrow::TrinoColumn;
-use datafusion_table_providers::sql::db_connection_pool::dbconnection::trinoconn::Error;
 use datafusion_table_providers::sql::db_connection_pool::trinodbpool::TrinoConnectionPool;
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use secrecy::SecretString;
-use serde::Deserialize;
 use serde_json::Value;
-use snafu::ResultExt;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -105,12 +101,12 @@ impl TrinoClient {
 
         Self {
             reqwest_client: client,
-            base_url: format!("http://localhost:{}", port),
+            base_url: format!("http://localhost:{port}"),
         }
     }
 
     async fn execute(&self, query: &str) -> Result<Vec<Vec<serde_json::Value>>, anyhow::Error> {
-        println!("Executing query: {}", query);
+        println!("Executing query: {query}");
 
         // Submit the query
         let url = format!("{}/v1/statement", self.base_url);

@@ -1,4 +1,3 @@
-use bigdecimal::BigDecimal;
 use snafu::Snafu;
 
 pub mod arrow;

@@ -100,7 +100,7 @@ impl TrinoConnectionPool {
     ///   * `url` or `host` + `port` - The Trino coordinator URL or host and port
     ///   * `catalog` - The default catalog to use (required)
     ///   * `schema` - The default schema to use (optional, defaults to "default")
-    ///   * `user` - The user to authenticate with (optional)
+    ///   * `user` - The user to authenticate with (required)
     ///   * `password` - The password for authentication (optional)
     ///   * `timeout` - Request timeout in seconds (optional, defaults to 300)
     ///   * `ssl_verification` - Whether to verify SSL certificates (optional, defaults to true)
@@ -167,7 +167,7 @@ impl TrinoConnectionPool {
     }
 
     async fn test_connection(client: &Client, base_url: &str) -> Result<()> {
-        let url = format!("{}/v1/info", base_url);
+        let url = format!("{base_url}/v1/info");
 
         let response = client
             .get(&url)
@@ -195,9 +195,9 @@ impl TrinoConnectionPool {
         schema: &str,
         user: &Option<String>,
     ) -> JoinPushDown {
-        let mut join_context = format!("url={},catalog={},schema={}", base_url, catalog, schema);
+        let mut join_context = format!("url={base_url},catalog={catalog},schema={schema}");
         if let Some(user) = user {
-            join_context.push_str(&format!(",user={}", user));
+            join_context.push_str(&format!(",user={user}"));
         }
 
         JoinPushDown::AllowedFor(join_context)
@@ -247,7 +247,7 @@ fn build_base_url(params: &HashMap<String, SecretString>) -> Result<String> {
             "http"
         };
 
-        Ok(format!("{}://{}:{}", protocol, host, port))
+        Ok(format!("{protocol}://{host}:{port}"))
     }
 }
 
@@ -326,7 +326,7 @@ fn build_headers(
         let encoded = BASE64.encode(credentials);
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
+            HeaderValue::from_str(&format!("Basic {encoded}")).unwrap(),
         );
     } else if let Some(token) = bearer_token {
         headers.insert(
@@ -723,17 +723,15 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
 
         assert_eq!(parse_u64_param(&params, "timeout", 300).unwrap(), 120);
         assert_eq!(parse_u16_param(&params, "port", 8080).unwrap(), 9080);
-        assert_eq!(
-            parse_bool_param(&params, "ssl_verification", true).unwrap(),
-            false
+        assert!(
+            !parse_bool_param(&params, "ssl_verification", true).unwrap()
         );
 
         // Test defaults
         assert_eq!(parse_u64_param(&params, "nonexistent", 300).unwrap(), 300);
         assert_eq!(parse_u16_param(&params, "nonexistent", 8080).unwrap(), 8080);
-        assert_eq!(
-            parse_bool_param(&params, "nonexistent", true).unwrap(),
-            true
+        assert!(
+            parse_bool_param(&params, "nonexistent", true).unwrap()
         );
     }
 

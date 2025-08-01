@@ -406,7 +406,7 @@ async fn test_trino_json_types(port: usize) {
 
     let sql = r#"SELECT "user_data", "metadata", "simple_string" FROM json_test_table"#;
     let df = ctx
-        .sql(&sql)
+        .sql(sql)
         .await
         .expect("DataFrame should be created from query");
 
@@ -504,7 +504,7 @@ async fn arrow_trino_one_way(
 
     let table = TrinoTable::new(
         &Arc::new(trino_conn_pool),
-        format!("memory.default.{}", table_name),
+        format!("memory.default.{table_name}"),
     )
     .await
     .expect("Table should be created");

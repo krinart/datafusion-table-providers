@@ -30,7 +30,7 @@ pub struct TrinoColumn {
 pub fn rows_to_arrow(rows: &[Vec<Value>], columns: &Vec<TrinoColumn>) -> Result<RecordBatch> {
     if rows.is_empty() {
         if !columns.is_empty() {
-            let schema = build_schema_from_columns(&columns)?;
+            let schema = build_schema_from_columns(columns)?;
             let empty_arrays: Vec<ArrayRef> = schema
                 .fields()
                 .iter()
@@ -43,7 +43,7 @@ pub fn rows_to_arrow(rows: &[Vec<Value>], columns: &Vec<TrinoColumn>) -> Result<
         return Ok(RecordBatch::new_empty(Arc::new(Schema::empty())));
     }
 
-    let schema = build_schema_from_columns(&columns)?;
+    let schema = build_schema_from_columns(columns)?;
     let mut builders = create_builders(&schema, rows.len())?;
 
     for row in rows {
@@ -798,12 +798,10 @@ fn append_decimal128_value(
                     } else {
                         builder.append_null();
                     }
+                } else if let Some(decimal_value) = big_decimal.to_i128() {
+                    builder.append_value(decimal_value);
                 } else {
-                    if let Some(decimal_value) = big_decimal.to_i128() {
-                        builder.append_value(decimal_value);
-                    } else {
-                        builder.append_null();
-                    }
+                    builder.append_null();
                 }
             } else {
                 return Err(Error::FailedToParseDecimal {
@@ -1402,7 +1400,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1415,7 +1413,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1428,7 +1426,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1441,7 +1439,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1454,7 +1452,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1505,7 +1503,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1524,11 +1522,11 @@ mod tests {
         for (i, expected_value) in expected.iter().enumerate() {
             match expected_value {
                 Some(val) => {
-                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
-                    assert_eq!(array.value(i), *val, "Mismatch at index {}", i);
+                    assert!(!array.is_null(i), "Expected non-null at index {i}");
+                    assert_eq!(array.value(i), *val, "Mismatch at index {i}");
                 }
                 None => {
-                    assert!(array.is_null(i), "Expected null at index {}", i);
+                    assert!(array.is_null(i), "Expected null at index {i}");
                 }
             }
         }
@@ -1549,11 +1547,11 @@ mod tests {
         for (i, expected_value) in expected.iter().enumerate() {
             match expected_value {
                 Some(val) => {
-                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
-                    assert_eq!(array.value(i), *val, "Mismatch at index {}", i);
+                    assert!(!array.is_null(i), "Expected non-null at index {i}");
+                    assert_eq!(array.value(i), *val, "Mismatch at index {i}");
                 }
                 None => {
-                    assert!(array.is_null(i), "Expected null at index {}", i);
+                    assert!(array.is_null(i), "Expected null at index {i}");
                 }
             }
         }
@@ -1568,7 +1566,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1585,7 +1583,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1602,7 +1600,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1619,7 +1617,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1636,7 +1634,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1681,7 +1679,7 @@ mod tests {
 
         assert_eq!(array.len(), expected.len(), "Array length mismatch");
         for (i, expected_value) in expected.iter().enumerate() {
-            assert_eq!(array.value(i), *expected_value, "Mismatch at index {}", i);
+            assert_eq!(array.value(i), *expected_value, "Mismatch at index {i}");
         }
     }
 
@@ -1701,29 +1699,26 @@ mod tests {
         for (i, expected_value) in expected.iter().enumerate() {
             match expected_value {
                 Some(expected_list) => {
-                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
+                    assert!(!array.is_null(i), "Expected non-null at index {i}");
                     let list_array = array.value(i);
                     let string_array = list_array.as_any().downcast_ref::<StringArray>().unwrap();
 
                     assert_eq!(
                         string_array.len(),
                         expected_list.len(),
-                        "List length mismatch at index {}",
-                        i
+                        "List length mismatch at index {i}"
                     );
 
                     for (j, expected_item) in expected_list.iter().enumerate() {
                         assert_eq!(
                             string_array.value(j),
                             *expected_item,
-                            "Mismatch at index {} item {}",
-                            i,
-                            j
+                            "Mismatch at index {i} item {j}"
                         );
                     }
                 }
                 None => {
-                    assert!(array.is_null(i), "Expected null at index {}", i);
+                    assert!(array.is_null(i), "Expected null at index {i}");
                 }
             }
         }
@@ -1745,29 +1740,26 @@ mod tests {
         for (i, expected_value) in expected.iter().enumerate() {
             match expected_value {
                 Some(expected_list) => {
-                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
+                    assert!(!array.is_null(i), "Expected non-null at index {i}");
                     let list_array = array.value(i);
                     let string_array = list_array.as_any().downcast_ref::<Int32Array>().unwrap();
 
                     assert_eq!(
                         string_array.len(),
                         expected_list.len(),
-                        "List length mismatch at index {}",
-                        i
+                        "List length mismatch at index {i}"
                     );
 
                     for (j, expected_item) in expected_list.iter().enumerate() {
                         assert_eq!(
                             string_array.value(j),
                             *expected_item,
-                            "Mismatch at index {} item {}",
-                            i,
-                            j
+                            "Mismatch at index {i} item {j}"
                         );
                     }
                 }
                 None => {
-                    assert!(array.is_null(i), "Expected null at index {}", i);
+                    assert!(array.is_null(i), "Expected null at index {i}");
                 }
             }
         }
@@ -1789,7 +1781,7 @@ mod tests {
         for (i, expected_value) in expected.iter().enumerate() {
             match expected_value {
                 Some(expected_struct) => {
-                    assert!(!array.is_null(i), "Expected non-null at index {}", i);
+                    assert!(!array.is_null(i), "Expected non-null at index {i}");
 
                     let mut actual_struct = serde_json::Map::new();
 
@@ -1825,12 +1817,11 @@ mod tests {
                     let actual_json = Value::Object(actual_struct);
                     assert_eq!(
                         actual_json, *expected_struct,
-                        "Struct mismatch at index {}",
-                        i
+                        "Struct mismatch at index {i}"
                     );
                 }
                 None => {
-                    assert!(array.is_null(i), "Expected null at index {}", i);
+                    assert!(array.is_null(i), "Expected null at index {i}");
                 }
             }
         }

@@ -89,7 +89,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         &self,
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
-        let sql = format!("DESCRIBE {}", table_reference.to_string());
+        let sql = format!("DESCRIBE {table_reference}");
 
         let query_result =
             self.execute_query(&sql)
@@ -318,7 +318,7 @@ impl TrinoConnection {
                 if state != "FINISHED" {
                     return Err(Error::TrinoServerError {
                         status_code: 500,
-                        message: format!("Query stuck in state: {}", state),
+                        message: format!("Query stuck in state: {state}"),
                     });
                 }
                 break;
