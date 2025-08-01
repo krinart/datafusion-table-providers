@@ -79,8 +79,6 @@ pub struct TrinoConnectionPool {
     client: Arc<Client>,
     join_push_down: JoinPushDown,
     unsupported_type_action: UnsupportedTypeAction,
-    user: Option<String>,
-    password: Option<SecretString>,
 }
 
 impl std::fmt::Debug for TrinoConnectionPool {
@@ -91,8 +89,6 @@ impl std::fmt::Debug for TrinoConnectionPool {
             .field("schema", &self.schema)
             .field("join_push_down", &self.join_push_down)
             .field("unsupported_type_action", &self.unsupported_type_action)
-            .field("user", &self.user)
-            .field("password", &"<redacted>")
             .finish()
     }
 }
@@ -110,7 +106,8 @@ impl TrinoConnectionPool {
     ///   * `password` - The password for authentication (optional)
     ///   * `timeout` - Request timeout in seconds (optional, defaults to 300)
     ///   * `ssl_verification` - Whether to verify SSL certificates (optional, defaults to true)
-    ///   * `identity_pem_path` - Path to a PEM file containing both the client certificate and private key for mTLS authentication.
+    ///   * `identity_pem_path` - Path to a PEM file containing both the client certificate and private key for mTLS authentication. (optional)
+    ///   * `bearer_token` - Bearer token for authentication (optional)
     ///
     /// # Errors
     ///
@@ -121,10 +118,11 @@ impl TrinoConnectionPool {
         let base_url = build_base_url(&params)?;
         let (catalog, schema) = get_catalog_and_schema(&params)?;
         let (user, password) = get_user_and_password(&params);
+        let bearer_token = params.get("bearer_token").cloned();
 
         validate_auth_exclusivity(&params, &user, &password)?;
 
-        let headers = build_headers(&catalog, &schema, &user, &password)?;
+        let headers = build_headers(&catalog, &schema, &user, &password, &bearer_token)?;
 
         let timeout_seconds = parse_u64_param(&params, "timeout", 300)?;
         let ssl_verification = parse_bool_param(&params, "ssl_verification", true)?;
@@ -161,8 +159,6 @@ impl TrinoConnectionPool {
             client: Arc::new(client),
             join_push_down,
             unsupported_type_action: UnsupportedTypeAction::default(),
-            user,
-            password,
         })
     }
 
@@ -311,6 +307,7 @@ fn build_headers(
     schema: &str,
     user: &Option<String>,
     password: &Option<SecretString>,
+    bearer_token: &Option<SecretString>,
 ) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
     headers.insert("X-Trino-Catalog", catalog.parse().unwrap());
@@ -326,6 +323,11 @@ fn build_headers(
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Basic {}", encoded)).unwrap(),
+        );
+    } else if let Some(token) = bearer_token {
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", token.expose_secret())).unwrap(),
         );
     }
 
