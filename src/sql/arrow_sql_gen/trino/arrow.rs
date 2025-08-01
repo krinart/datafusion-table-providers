@@ -1202,8 +1202,6 @@ fn append_to_struct_field_builder(
     value: Option<&Value>,
     field_data_type: &DataType,
 ) -> Result<()> {
-    println!("append_to_struct_field_builder: {:?}", field_data_type);
-
     match field_data_type {
         DataType::Boolean => {
             let field_builder = builder

@@ -112,8 +112,6 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
                 }
             }
 
-            println!("Fields: {:?}", fields);
-
             return Ok(DataType::Struct(Fields::from(fields)));
         }
     }

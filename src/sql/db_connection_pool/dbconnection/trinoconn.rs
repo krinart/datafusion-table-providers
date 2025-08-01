@@ -217,7 +217,6 @@ impl TrinoConnection {
     }
 
     async fn execute_query(&self, sql: &str) -> Result<TrinoQueryResult, Error> {
-        println!("Executing query: {}", sql);
 
         let url = format!("{}/v1/statement", self.base_url);
 
@@ -274,15 +273,9 @@ impl TrinoConnection {
             }
 
             let state = result["stats"]["state"].as_str().unwrap_or("");
-            println!(
-                "State: {}, next uri: {}",
-                state,
-                result.get("nextUri").and_then(|v| v.as_str()).unwrap_or("")
-            );
 
             // Extract data rows
             if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
-                println!("data detected");
                 for row in data {
                     if let Some(row_array) = row.as_array() {
                         all_data.push(row_array.clone());
