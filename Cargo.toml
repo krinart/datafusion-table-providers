@@ -82,6 +82,7 @@ tokio-stream = { version = "0.1.15", features = ["net"] }
 insta = { version = "1.40.0", features = ["filters"] }
 datafusion-physical-plan = { version = "47" }
 tempfile = "3.8.1"
+mockito = "1.7.0"
 
 [features]
 mysql = ["dep:mysql_async", "dep:async-stream"]

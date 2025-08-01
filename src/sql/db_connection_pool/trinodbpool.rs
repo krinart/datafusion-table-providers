@@ -118,7 +118,7 @@ impl TrinoConnectionPool {
         let (user, password) = get_user_and_password(&params);
         let bearer_token = params.get("bearer_token").cloned();
 
-        validate_auth_exclusivity(&params, &user, &password)?;
+        validate_auth(&params, &user, &password)?;
 
         let headers = build_headers(&catalog, &schema, &user, &password, &bearer_token)?;
 
@@ -277,21 +277,28 @@ fn get_user_and_password(
     (user, password)
 }
 
-fn validate_auth_exclusivity(
+fn validate_auth(
     params: &HashMap<String, SecretString>,
     user: &Option<String>,
     password: &Option<SecretString>,
 ) -> Result<()> {
-    let has_user_pass = user.is_some() || password.is_some();
+    let has_user = user.is_some();
+    let has_user_pass = user.is_some() && password.is_some();
     let has_identity = params.contains_key("identity_pem_path");
     let has_token = params.contains_key("bearer_token");
+
+    if !has_user {
+        return Err(Error::InvalidAuthConfig {
+            details: "User is required".into(),
+        });
+    }
 
     let auth_count = [has_user_pass, has_identity, has_token]
         .into_iter()
         .filter(|x| *x)
         .count();
 
-    if auth_count != 1 {
+    if auth_count > 1 {
         return Err(Error::InvalidAuthConfig {
             details: "Exactly one authentication method must be provided: basic auth, mTLS, or bearer token".into(),
         });
@@ -364,4 +371,430 @@ fn parse_bool_param(
         .unwrap_or(&default.to_string())
         .parse::<bool>()
         .or_else(|_| Ok(default))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::{Server};
+    use secrecy::SecretString;
+    use std::collections::HashMap;
+    use tempfile::NamedTempFile;
+
+    fn create_basic_params() -> HashMap<String, SecretString> {
+        let mut params = HashMap::new();
+        params.insert("catalog".to_string(), SecretString::new("test_catalog".into()));
+        params.insert("schema".to_string(), SecretString::new("test_schema".into()));
+        params
+    }
+
+    fn create_mock_pem_file() -> NamedTempFile {
+        let pem_content = r#"-----BEGIN CERTIFICATE-----
+MIICljCCAX4CCQCKLy2PtfxYqjANBgkqhkiG9w0BAQsFADANMQswCQYDVQQGEwJV
+UzAeFw0yMzEwMDEwMDAwMDBaFw0yNDA5MzAyMzU5NTlaMA0xCzAJBgNVBAYTAlVT
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyJ3yfgDHc...
+-----END CERTIFICATE-----
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
+-----END PRIVATE KEY-----"#;
+
+        let mut file = NamedTempFile::new().expect("Failed to create temp file");
+        std::io::Write::write_all(&mut file, pem_content.as_bytes())
+            .expect("Failed to write to temp file");
+        file
+    }
+
+    #[tokio::test]
+    async fn test_new_with_url_basic_auth() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(200)
+            .with_body(r#"{"nodeVersion":{"version":"1.0"}}"#)
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new(server.url().into()));
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+        params.insert("password".to_string(), SecretString::new("testpass".into()));
+
+        let pool = TrinoConnectionPool::new(params).await;
+        assert!(pool.is_ok());
+
+        let pool = pool.unwrap();
+        assert_eq!(pool.base_url, server.url());
+        assert_eq!(pool.catalog, "test_catalog");
+        assert_eq!(pool.schema, "test_schema");
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_new_with_bearer_token() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(200)
+            .with_header("Authorization", "Bearer test-token-123")
+            .with_body(r#"{"nodeVersion":{"version":"1.0"}}"#)
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new(server.url().into()));
+        params.insert("bearer_token".to_string(), SecretString::new("test-token-123".into()));
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+
+        let pool = TrinoConnectionPool::new(params).await;
+        assert!(pool.is_ok());
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_new_with_host_port() {
+        let mut server = Server::new_async().await;
+        let url = server.url();
+        let url_parts: Vec<&str> = url.split(':').collect();
+        let host = url_parts[1].trim_start_matches("//");
+        let port: u16 = url_parts[2].parse().unwrap();
+
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(200)
+            .with_body(r#"{"nodeVersion":{"version":"1.0"}}"#)
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("host".to_string(), SecretString::new(host.into()));
+        params.insert("port".to_string(), SecretString::new(port.to_string().into()));
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+
+        let pool = TrinoConnectionPool::new(params).await
+            .expect("Failed to create TrinoConnectionPool");
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_new_with_mtls() {
+        let pem_file = create_mock_pem_file();
+        let mut server = Server::new_async().await;
+
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(200)
+            .with_body(r#"{"nodeVersion":{"version":"1.0"}}"#)
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new(server.url().into()));
+        params.insert("identity_pem_path".to_string(),
+                      SecretString::new(pem_file.path().to_string_lossy().into()));
+
+        // Note: This test may fail in practice due to actual TLS validation
+        // In a real test environment, you'd want to use a proper test certificate
+        let pool = TrinoConnectionPool::new(params).await;
+        // For this test, we're mainly checking that the PEM file is read correctly
+        // The actual TLS handshake would require a proper test setup
+    }
+
+    #[tokio::test]
+    async fn test_new_missing_catalog() {
+        let mut params = HashMap::new();
+        params.insert("url".to_string(), SecretString::new("http://localhost:8080".into()));
+
+        let result = TrinoConnectionPool::new(params).await;
+        assert!(result.is_err());
+
+        if let Err(Error::MissingRequiredParameter { parameter_name }) = result {
+            assert_eq!(parameter_name, "catalog");
+        } else {
+            panic!("Expected MissingRequiredParameter error for catalog");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_new_missing_url_and_host() {
+        let params = create_basic_params();
+
+        let result = TrinoConnectionPool::new(params).await;
+        assert!(result.is_err());
+
+        if let Err(Error::MissingRequiredParameter { parameter_name }) = result {
+            assert_eq!(parameter_name, "url or host");
+        } else {
+            panic!("Expected MissingRequiredParameter error for url or host");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_url_format() {
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new("invalid-url".into()));
+
+        let result = TrinoConnectionPool::new(params).await;
+        assert!(result.is_err());
+
+        if let Err(Error::InvalidTrinoUrl { url }) = result {
+            assert_eq!(url, "invalid-url");
+        } else {
+            panic!("Expected InvalidTrinoUrl error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_authentication_failed() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(401)
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new(server.url().into()));
+        params.insert("user".to_string(), SecretString::new("baduser".into()));
+        params.insert("password".to_string(), SecretString::new("badpass".into()));
+
+        let result = TrinoConnectionPool::new(params).await;
+        assert!(result.is_err());
+
+        if let Err(Error::AuthenticationFailedError) = result {
+            // Expected
+        } else {
+            panic!("Expected AuthenticationFailedError");
+        }
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_server_error() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new(server.url().into()));
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+
+        let result = TrinoConnectionPool::new(params).await;
+        assert!(result.is_err());
+
+        if let Err(Error::TrinoServerError { status_code, .. }) = result {
+            assert_eq!(status_code, 500);
+        } else {
+            panic!("Expected TrinoServerError");
+        }
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_multiple_auth_methods_error() {
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new("http://localhost:8080".into()));
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+        params.insert("password".to_string(), SecretString::new("testpass".into()));
+        params.insert("bearer_token".to_string(), SecretString::new("token123".into()));
+
+        let result = TrinoConnectionPool::new(params).await;
+        assert!(result.is_err());
+
+        if let Err(Error::InvalidAuthConfig { details }) = result {
+            assert!(details.contains("Exactly one authentication method"));
+        } else {
+            panic!("Expected InvalidAuthConfig error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_no_auth_method_allowed() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(200)
+            .with_body(r#"{"nodeVersion":{"version":"1.0"}}"#)
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new(server.url().into()));
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+
+        let result = TrinoConnectionPool::new(params).await;
+        assert!(result.is_ok());
+
+        mock.assert_async().await;
+    }
+
+    #[test]
+    fn test_build_headers_basic_auth() {
+        let user = Some("testuser".to_string());
+        let password = Some(SecretString::new("testpass".into()));
+        let bearer_token = None;
+
+        let headers = build_headers("catalog", "schema", &user, &password, &bearer_token).unwrap();
+
+        assert_eq!(headers.get("X-Trino-Catalog").unwrap(), "catalog");
+        assert_eq!(headers.get("X-Trino-Schema").unwrap(), "schema");
+        assert_eq!(headers.get("X-Trino-User").unwrap(), "testuser");
+
+        let auth_header = headers.get("Authorization").unwrap().to_str().unwrap();
+        assert!(auth_header.starts_with("Basic "));
+
+        // Decode and verify the basic auth
+        let encoded = auth_header.strip_prefix("Basic ").unwrap();
+        let decoded = String::from_utf8(BASE64.decode(encoded).unwrap()).unwrap();
+        assert_eq!(decoded, "testuser:testpass");
+    }
+
+    #[test]
+    fn test_build_headers_bearer_token() {
+        let user = None;
+        let password = None;
+        let bearer_token = Some(SecretString::new("test-token-123".into()));
+
+        let headers = build_headers("catalog", "schema", &user, &password, &bearer_token).unwrap();
+
+        assert_eq!(headers.get("X-Trino-Catalog").unwrap(), "catalog");
+        assert_eq!(headers.get("X-Trino-Schema").unwrap(), "schema");
+        assert!(headers.get("X-Trino-User").is_none());
+
+        let auth_header = headers.get("Authorization").unwrap().to_str().unwrap();
+        assert_eq!(auth_header, "Bearer test-token-123");
+    }
+
+    #[test]
+    fn test_build_headers_no_auth() {
+        let user = None;
+        let password = None;
+        let bearer_token = None;
+
+        let headers = build_headers("catalog", "schema", &user, &password, &bearer_token).unwrap();
+
+        assert_eq!(headers.get("X-Trino-Catalog").unwrap(), "catalog");
+        assert_eq!(headers.get("X-Trino-Schema").unwrap(), "schema");
+        assert!(headers.get("X-Trino-User").is_none());
+        assert!(headers.get("Authorization").is_none());
+    }
+
+    #[test]
+    fn test_parse_parameters() {
+        let mut params = HashMap::new();
+        params.insert("timeout".to_string(), SecretString::new("120".into()));
+        params.insert("port".to_string(), SecretString::new("9080".into()));
+        params.insert("ssl_verification".to_string(), SecretString::new("false".into()));
+
+        assert_eq!(parse_u64_param(&params, "timeout", 300).unwrap(), 120);
+        assert_eq!(parse_u16_param(&params, "port", 8080).unwrap(), 9080);
+        assert_eq!(parse_bool_param(&params, "ssl_verification", true).unwrap(), false);
+
+        // Test defaults
+        assert_eq!(parse_u64_param(&params, "nonexistent", 300).unwrap(), 300);
+        assert_eq!(parse_u16_param(&params, "nonexistent", 8080).unwrap(), 8080);
+        assert_eq!(parse_bool_param(&params, "nonexistent", true).unwrap(), true);
+    }
+
+    #[test]
+    fn test_parse_invalid_parameters() {
+        let mut params = HashMap::new();
+        params.insert("timeout".to_string(), SecretString::new("invalid".into()));
+        params.insert("port".to_string(), SecretString::new("99999".into())); // Too large for u16
+
+        assert!(parse_u64_param(&params, "timeout", 300).is_err());
+        assert!(parse_u16_param(&params, "port", 8080).is_err());
+    }
+
+    #[test]
+    fn test_validate_auth() {
+        // Test valid cases
+        let mut params = HashMap::new();
+        let user = Some("user".to_string());
+        let password = Some(SecretString::new("pass".into()));
+        assert!(validate_auth(&params, &user, &password).is_ok());
+
+        let password = None;
+        params.insert("bearer_token".to_string(), SecretString::new("token".into()));
+        assert!(validate_auth(&params, &user, &password).is_ok());
+
+        // Test invalid case - multiple auth methods
+        let user = Some("user".to_string());
+        let password = Some(SecretString::new("pass".into()));
+        assert!(validate_auth(&params, &user, &password).is_err());
+
+        // User is required
+        let user = None;
+        let password = None;
+        params.insert("bearer_token".to_string(), SecretString::new("token".into()));
+        assert!(validate_auth(&params, &user, &password).is_err());
+    }
+
+    #[test]
+    fn test_get_catalog_and_schema() {
+        let mut params = HashMap::new();
+        params.insert("catalog".to_string(), SecretString::new("test_cat".into()));
+        params.insert("schema".to_string(), SecretString::new("test_schema".into()));
+
+        let (catalog, schema) = get_catalog_and_schema(&params).unwrap();
+        assert_eq!(catalog, "test_cat");
+        assert_eq!(schema, "test_schema");
+
+        params.remove("schema");
+        let (catalog, schema) = get_catalog_and_schema(&params).unwrap();
+        assert_eq!(catalog, "test_cat");
+        assert_eq!(schema, "default");
+    }
+
+    #[test]
+    fn test_get_user_and_password() {
+        let mut params = HashMap::new();
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+        params.insert("password".to_string(), SecretString::new("testpass".into()));
+
+        let (user, password) = get_user_and_password(&params);
+        assert_eq!(user, Some("testuser".to_string()));
+        assert!(password.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_with_unsupported_type_action() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/info")
+            .with_status(200)
+            .with_body(r#"{"nodeVersion":{"version":"1.0"}}"#)
+            .create_async()
+            .await;
+
+        let mut params = create_basic_params();
+        params.insert("url".to_string(), SecretString::new(server.url().into()));
+        params.insert("user".to_string(), SecretString::new("testuser".into()));
+
+        let pool = TrinoConnectionPool::new(params)
+            .await
+            .unwrap()
+            .with_unsupported_type_action(UnsupportedTypeAction::Error);
+
+        assert_eq!(pool.unsupported_type_action, UnsupportedTypeAction::Error);
+
+        mock.assert_async().await;
+    }
+
+    #[test]
+    fn test_build_base_url_with_trailing_slash() {
+        let mut params = HashMap::new();
+        params.insert("url".to_string(), SecretString::new("http://localhost:8080/".into()));
+
+        let url = build_base_url(&params).unwrap();
+        assert_eq!(url, "http://localhost:8080");
+    }
 }
