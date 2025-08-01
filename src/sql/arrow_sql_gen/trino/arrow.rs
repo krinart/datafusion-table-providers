@@ -2291,9 +2291,7 @@ mod tests {
         ];
 
         let result = rows_to_arrow(&rows, &columns).unwrap();
-        assert_eq!(result.num_rows(), 4);
 
-        // Since nested structs inside structs are treated as strings, we expect the nested struct to be serialized as JSON string
         assert_struct_array(
             &result,
             0,
@@ -2312,7 +2310,7 @@ mod tests {
 
         let rows = vec![
             vec![json!({"key1": 1, "key2": 2})],
-            vec![json!([{"key": "key3", "value": 3}])], // Array of key-value pairs
+            vec![json!([{"key": "key3", "value": 3}])],
             vec![Value::Null],
         ];
 
@@ -2325,6 +2323,78 @@ mod tests {
             vec![
                 Some(r#"{"key1":1,"key2":2}"#),
                 Some(r#"[{"key":"key3","value":3}]"#),
+                None,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_map_with_list() {
+        let columns = create_test_columns(vec![("map_col", "map(varchar, array(varchar))")]);
+
+        let rows = vec![
+            vec![json!({"key1": ["item1", "item2"], "key2": ["item3"]})],
+            vec![json!({"key3": []})],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+
+        assert_string_array_with_nulls(
+            &result,
+            0,
+            vec![
+                Some(r#"{"key1":["item1","item2"],"key2":["item3"]}"#),
+                Some(r#"{"key3":[]}"#),
+                None,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_map_with_struct() {
+        let columns = create_test_columns(vec![("map_col", "map(varchar, row(name varchar, age integer))")]);
+
+        let rows = vec![
+            vec![json!({"person1": {"name": "Alice", "age": 30}, "person2": {"name": "Bob", "age": 25}})],
+            vec![json!({"person3": {"name": "Charlie", "age": 35}})],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+
+        assert_string_array_with_nulls(
+            &result,
+            0,
+            vec![
+                Some(r#"{"person1":{"age":30,"name":"Alice"},"person2":{"age":25,"name":"Bob"}}"#),
+                Some(r#"{"person3":{"age":35,"name":"Charlie"}}"#),
+                None,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_map_with_map() {
+        let columns = create_test_columns(vec![("map_col", "map(varchar, map(varchar, integer))")]);
+
+        let rows = vec![
+            vec![json!({"outer1": {"inner1": 1, "inner2": 2}, "outer2": {"inner3": 3}})],
+            vec![json!({"outer3": {}})],
+            vec![Value::Null],
+        ];
+
+        let result = rows_to_arrow(&rows, &columns).unwrap();
+        assert_eq!(result.num_rows(), 3);
+
+        assert_string_array_with_nulls(
+            &result,
+            0,
+            vec![
+                Some(r#"{"outer1":{"inner1":1,"inner2":2},"outer2":{"inner3":3}}"#),
+                Some(r#"{"outer3":{}}"#),
                 None,
             ],
         );
