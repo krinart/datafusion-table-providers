@@ -107,6 +107,8 @@ fn parse_row_type(type_str: &str) -> Result<DataType> {
                 }
             }
 
+            println!("Fields: {:?}", fields);
+
             return Ok(DataType::Struct(Fields::from(fields)));
         }
     }
@@ -390,8 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_nested_types() {
-        // Row with array field
+    fn test_row_type_with_array() {
         let expected_row_array = DataType::Struct(Fields::from(vec![
             Field::new("name", DataType::Utf8, true),
             Field::new(
@@ -402,6 +403,40 @@ mod tests {
         ]));
         assert_eq!(
             trino_data_type_to_arrow_type("row(name varchar, scores array(integer))").unwrap(),
+            expected_row_array
+        );
+    }
+
+    #[test]
+    fn test_row_type_with_map() {
+        let expected_row_array = DataType::Struct(Fields::from(vec![
+            Field::new("name", DataType::Utf8, true),
+            Field::new(
+                "scores",
+                DataType::Utf8,
+                true,
+            ),
+        ]));
+        assert_eq!(
+            trino_data_type_to_arrow_type("row(name varchar, scores map(varchar, integer))").unwrap(),
+            expected_row_array
+        );
+    }
+
+    #[test]
+    fn test_row_type_with_nested_row() {
+        let expected_row_array = DataType::Struct(Fields::from(vec![
+            Field::new("name", DataType::Utf8, true),
+            Field::new(
+                "scores",
+                DataType::Struct(Fields::from(vec![
+                    Field::new("value", DataType::Int32, true),
+                ])),
+                true,
+            ),
+        ]));
+        assert_eq!(
+            trino_data_type_to_arrow_type("row(name varchar, scores row(value integer))").unwrap(),
             expected_row_array
         );
     }
