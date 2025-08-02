@@ -3,7 +3,7 @@ use arrow::{
     array::{
         ArrayBuilder, ArrayRef, BinaryBuilder, BooleanBuilder, Date32Builder, Decimal128Builder,
         Decimal256Builder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
-        Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder, NullBuilder, RecordBatch,
+        Int64Builder, Int8Builder, ListBuilder, NullBuilder, RecordBatch,
         StringBuilder, StructBuilder, Time32MillisecondBuilder, Time64MicrosecondBuilder,
         Time64NanosecondBuilder, TimestampMicrosecondBuilder, TimestampMillisecondBuilder,
         TimestampNanosecondBuilder,
@@ -54,6 +54,7 @@ fn create_builders(schema: &SchemaRef, capacity: usize) -> Result<BuilderMap> {
 
 fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<dyn ArrayBuilder>> {
     match field.data_type() {
+        DataType::Null => Ok(Box::new(NullBuilder::new())),
         DataType::Boolean => Ok(Box::new(BooleanBuilder::with_capacity(capacity))),
         DataType::Int8 => Ok(Box::new(Int8Builder::with_capacity(capacity))),
         DataType::Int16 => Ok(Box::new(Int16Builder::with_capacity(capacity))),
@@ -61,8 +62,17 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         DataType::Int64 => Ok(Box::new(Int64Builder::with_capacity(capacity))),
         DataType::Float32 => Ok(Box::new(Float32Builder::with_capacity(capacity))),
         DataType::Float64 => Ok(Box::new(Float64Builder::with_capacity(capacity))),
+        DataType::Decimal128(precision, scale) => {
+            let builder = Decimal128BuilderWrapper::new(capacity, *precision, *scale)
+                .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            Ok(Box::new(builder))
+        }
+        DataType::Decimal256(precision, scale) => {
+            let builder = Decimal256BuilderWrapper::new(capacity, *precision, *scale)
+                .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
+            Ok(Box::new(builder))
+        }
         DataType::Utf8 => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
-        DataType::LargeUtf8 => Ok(Box::new(LargeStringBuilder::with_capacity(capacity, 1024))),
         DataType::Binary => Ok(Box::new(BinaryBuilder::with_capacity(capacity, 1024))),
         DataType::Date32 => Ok(Box::new(Date32Builder::with_capacity(capacity))),
         DataType::Time32(TimeUnit::Second | TimeUnit::Millisecond) => {
@@ -88,16 +98,6 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
                     .with_timezone_opt(tz_opt.clone()),
             )),
         },
-        DataType::Decimal128(precision, scale) => {
-            let builder = Decimal128BuilderWrapper::new(capacity, *precision, *scale)
-                .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
-            Ok(Box::new(builder))
-        }
-        DataType::Decimal256(precision, scale) => {
-            let builder = Decimal256BuilderWrapper::new(capacity, *precision, *scale)
-                .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
-            Ok(Box::new(builder))
-        }
         DataType::List(field) => create_list_builder_for_field(field, capacity),
         DataType::Struct(fields) => {
             let mut field_builders = Vec::new();
@@ -106,8 +106,9 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             }
             Ok(Box::new(StructBuilder::new(fields.clone(), field_builders)))
         }
-        DataType::Null => Ok(Box::new(NullBuilder::new())),
-        _ => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
+        arrow_type => Err(Error::UnsupportedArrowType {
+            arrow_type: arrow_type.to_string(),
+        }),
     }
 }
 
@@ -230,6 +231,10 @@ fn create_list_builder_for_field(
     capacity: usize,
 ) -> Result<Box<dyn ArrayBuilder>> {
     match inner_field.data_type() {
+        DataType::Null => {
+            let values_builder = NullBuilder::new();
+            Ok(Box::new(ListBuilder::new(values_builder)))
+        }
         DataType::Boolean => {
             let values_builder: Box<dyn ArrayBuilder> =
                 Box::new(BooleanBuilder::with_capacity(capacity * 4));
@@ -264,10 +269,6 @@ fn create_list_builder_for_field(
             let values_builder = StringBuilder::with_capacity(capacity * 4, 1024);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
-        DataType::LargeUtf8 => {
-            let values_builder = LargeStringBuilder::with_capacity(capacity * 4, 1024);
-            Ok(Box::new(ListBuilder::new(values_builder)))
-        }
         DataType::Binary => {
             let values_builder = BinaryBuilder::with_capacity(capacity * 4, 1024);
             Ok(Box::new(ListBuilder::new(values_builder)))
@@ -276,7 +277,7 @@ fn create_list_builder_for_field(
             let values_builder = Date32Builder::with_capacity(capacity * 4);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
-        DataType::Time32(TimeUnit::Millisecond) => {
+        DataType::Time32(TimeUnit::Second | TimeUnit::Millisecond) => {
             let values_builder = Time32MillisecondBuilder::with_capacity(capacity * 4);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
@@ -288,17 +289,19 @@ fn create_list_builder_for_field(
             let values_builder = Time64NanosecondBuilder::with_capacity(capacity * 4);
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
-        DataType::Timestamp(TimeUnit::Millisecond, _) => {
-            let values_builder = TimestampMillisecondBuilder::with_capacity(capacity * 4);
-            Ok(Box::new(ListBuilder::new(values_builder)))
-        }
-        DataType::Timestamp(TimeUnit::Microsecond, _) => {
-            let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4);
-            Ok(Box::new(ListBuilder::new(values_builder)))
-        }
-        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-            let values_builder = TimestampNanosecondBuilder::with_capacity(capacity * 4);
-            Ok(Box::new(ListBuilder::new(values_builder)))
+        DataType::Timestamp(time_unit, tz_opt) => match time_unit {
+            TimeUnit::Second | TimeUnit::Millisecond => {
+                let values_builder = TimestampMillisecondBuilder::with_capacity(capacity * 4).with_timezone_opt(tz_opt.clone());
+                Ok(Box::new(ListBuilder::new(values_builder)))
+            }
+            TimeUnit::Microsecond => {
+                let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4).with_timezone_opt(tz_opt.clone());
+                Ok(Box::new(ListBuilder::new(values_builder)))
+            }
+            TimeUnit::Nanosecond => {
+                let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4).with_timezone_opt(tz_opt.clone());
+                Ok(Box::new(ListBuilder::new(values_builder)))
+            }
         }
         DataType::Decimal128(precision, scale) => {
             let values_builder = Decimal128BuilderWrapper::new(capacity * 4, *precision, *scale)
@@ -310,14 +313,9 @@ fn create_list_builder_for_field(
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
             Ok(Box::new(ListBuilder::new(values_builder)))
         }
-        DataType::Null => {
-            let values_builder = NullBuilder::new();
-            Ok(Box::new(ListBuilder::new(values_builder)))
-        }
-        _ => {
-            let values_builder = StringBuilder::with_capacity(capacity * 4, 1024);
-            Ok(Box::new(ListBuilder::new(values_builder)))
-        }
+        arrow_type => Err(Error::UnsupportedArrowType {
+            arrow_type: arrow_type.to_string(),
+        }),
     }
 }
 
@@ -419,15 +417,6 @@ fn append_value_to_builder(
                     expected: "StringBuilder".to_string(),
                 })?;
             append_string_value(string_builder, value);
-        }
-        DataType::LargeUtf8 => {
-            let large_string_builder = builder
-                .as_any_mut()
-                .downcast_mut::<LargeStringBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError {
-                    expected: "LargeStringBuilder".to_string(),
-                })?;
-            append_large_string_value(large_string_builder, value);
         }
         DataType::Binary => {
             let binary_builder = builder
@@ -540,15 +529,11 @@ fn append_value_to_builder(
                 })?;
             null_builder.append_null();
         }
-        _ => {
-            let string_builder = builder
-                .as_any_mut()
-                .downcast_mut::<StringBuilder>()
-                .ok_or_else(|| Error::BuilderDowncastError {
-                    expected: "StringBuilder (fallback) - 1".to_string(),
-                })?;
-            append_string_value(string_builder, value);
-        }
+        arrow_type => {
+            return Err(Error::UnsupportedArrowType {
+                arrow_type: arrow_type.to_string(),
+            });
+        },
     }
     Ok(())
 }
@@ -656,18 +641,6 @@ fn append_float64_value(builder: &mut Float64Builder, value: Option<&Value>) {
 }
 
 fn append_string_value(builder: &mut StringBuilder, value: Option<&Value>) {
-    match value {
-        Some(v) if v.is_null() => builder.append_null(),
-        Some(Value::String(s)) => builder.append_value(s),
-        Some(other) => {
-            let str_val = serde_json::to_string(other).unwrap_or_default();
-            builder.append_value(&str_val);
-        }
-        None => builder.append_null(),
-    }
-}
-
-fn append_large_string_value(builder: &mut LargeStringBuilder, value: Option<&Value>) {
     match value {
         Some(v) if v.is_null() => builder.append_null(),
         Some(Value::String(s)) => builder.append_value(s),
@@ -1031,11 +1004,6 @@ fn append_null_to_list_builder(builder: &mut dyn ArrayBuilder) -> Result<()> {
         list_builder.append_null();
     } else if let Some(list_builder) = builder
         .as_any_mut()
-        .downcast_mut::<ListBuilder<LargeStringBuilder>>()
-    {
-        list_builder.append_null();
-    } else if let Some(list_builder) = builder
-        .as_any_mut()
         .downcast_mut::<ListBuilder<BooleanBuilder>>()
     {
         list_builder.append_null();
@@ -1139,14 +1107,6 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
     {
         for item in arr {
             append_string_value(list_builder.values(), Some(item));
-        }
-        list_builder.append(true);
-    } else if let Some(list_builder) = builder
-        .as_any_mut()
-        .downcast_mut::<ListBuilder<LargeStringBuilder>>()
-    {
-        for item in arr {
-            append_large_string_value(list_builder.values(), Some(item));
         }
         list_builder.append(true);
     } else if let Some(list_builder) = builder
@@ -1415,14 +1375,6 @@ fn append_to_struct_field_builder(
                     expected: "StringBuilder".to_string(),
                 })?;
             append_string_value(field_builder, value);
-        }
-        DataType::LargeUtf8 => {
-            let field_builder = builder
-                .field_builder::<LargeStringBuilder>(field_index)
-                .ok_or_else(|| Error::BuilderDowncastError {
-                    expected: "LargeStringBuilder".to_string(),
-                })?;
-            append_large_string_value(field_builder, value);
         }
         DataType::Binary => {
             let field_builder = builder

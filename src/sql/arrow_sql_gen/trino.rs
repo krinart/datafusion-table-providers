@@ -18,6 +18,9 @@ pub enum Error {
     #[snafu(display("Unsupported Trino type: {trino_type}"))]
     UnsupportedTrinoType { trino_type: String },
 
+    #[snafu(display("Unsupported Arrow type: {arrow_type}"))]
+    UnsupportedArrowType { arrow_type: String },
+
     #[snafu(display("Invalid date value: {value}"))]
     InvalidDateValue { value: String },
 

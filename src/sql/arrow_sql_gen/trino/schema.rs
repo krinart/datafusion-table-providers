@@ -38,7 +38,6 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
         "double" => Ok(DataType::Float64),
         "varchar" | "char" => Ok(DataType::Utf8),
         "varbinary" => Ok(DataType::Binary),
-        "json" => Ok(DataType::LargeUtf8),
         "date" => Ok(DataType::Date32),
         _ if normalized_type.starts_with("decimal") || normalized_type.starts_with("numeric") => {
             parse_decimal_type(&normalized_type)
@@ -253,14 +252,7 @@ mod tests {
             trino_data_type_to_arrow_type("varbinary").unwrap(),
             DataType::Binary
         );
-        assert_eq!(
-            trino_data_type_to_arrow_type("json").unwrap(),
-            DataType::LargeUtf8
-        );
-    }
 
-    #[test]
-    fn test_parametrized_string_types() {
         assert_eq!(
             trino_data_type_to_arrow_type("varchar(255)").unwrap(),
             DataType::Utf8
