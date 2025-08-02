@@ -29,23 +29,16 @@ pub type QueryStream = Pin<Box<dyn Stream<Item = Result<Vec<Vec<Value>>, Error>>
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Query execution failed.\n{source}\nFor details, refer to the Trino documentation: https://trino.io/docs/"))]
-    QueryError {
-        source: reqwest::Error,
-    },
+    QueryError { source: reqwest::Error },
 
     #[snafu(display("Failed to convert query result to Arrow.\n{source}\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
-    ConversionError {
-        source: trino::Error,
-    },
+    ConversionError { source: trino::Error },
 
     #[snafu(display("Authentication failed."))]
     AuthenticationFailedError,
 
     #[snafu(display("Trino server error: {status_code} - {message}"))]
-    TrinoServerError {
-        status_code: u16,
-        message: String,
-    },
+    TrinoServerError { status_code: u16, message: String },
 
     #[snafu(display("Unsupported data type '{data_type}' for field '{column_name}'.\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
     UnsupportedDataTypeError {
@@ -54,10 +47,9 @@ pub enum Error {
     },
 
     #[snafu(display("Failed to find the field '{field}'.\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issues"))]
-    MissingFieldError {
-        field: String,
-    },
+    MissingFieldError { field: String },
 
+    #[snafu(display("No schema was provide.\nReport a bug to request support: https://github.com/datafusion-contrib/datafusion-table-providers/issuesd"))]
     NoSchema,
 }
 
@@ -157,6 +149,8 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         _params: &[&'a str],
         projected_schema: Option<SchemaRef>,
     ) -> Result<SendableRecordBatchStream> {
+        let schema_ref = projected_schema.ok_or(Error::NoSchema)?;
+
         let mut query_stream = self.execute_query_stream(sql);
 
         let mut arrow_stream = Box::pin(stream! {
@@ -168,7 +162,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                 if !batch_data.is_empty() {
                     let chunk_size = 4_000;
                     for chunk in batch_data.chunks(chunk_size) {
-                        let rec = rows_to_arrow(chunk, &projected_schema)
+                        let rec = rows_to_arrow(chunk, Arc::clone(&schema_ref))
                             .map_err(|e| super::Error::UnableToQueryArrow {
                                 source: Box::new(Error::ConversionError { source: e }),
                             })?;

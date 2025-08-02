@@ -23,27 +23,20 @@ use std::any::Any;
 use std::str::FromStr;
 use std::{collections::HashMap, sync::Arc};
 
-pub fn rows_to_arrow(rows: &[Vec<Value>], schema: &Option<SchemaRef>) -> Result<RecordBatch> {
-    let schema_ref = match schema {
-        Some(s) => s,
-        None => {
-            return Err(Error::NoSchema);
-        }
-    };
-
+pub fn rows_to_arrow(rows: &[Vec<Value>], schema: SchemaRef) -> Result<RecordBatch> {
     if rows.is_empty() {
-        return Ok(RecordBatch::new_empty(Arc::clone(schema_ref)));
+        return Ok(RecordBatch::new_empty(Arc::clone(&schema)));
     }
 
-    let mut builders = create_builders(schema_ref, rows.len())?;
+    let mut builders = create_builders(&schema, rows.len())?;
 
     for row in rows {
-        append_row_to_builders(row, schema_ref, &mut builders)?;
+        append_row_to_builders(row, &schema, &mut builders)?;
     }
 
-    let arrays = finish_builders(builders, schema_ref)?;
+    let arrays = finish_builders(builders, &schema)?;
 
-    RecordBatch::try_new(Arc::clone(schema_ref), arrays).context(FailedToBuildRecordBatchSnafu)
+    RecordBatch::try_new(Arc::clone(&schema), arrays).context(FailedToBuildRecordBatchSnafu)
 }
 
 type BuilderMap = HashMap<String, Box<dyn ArrayBuilder>>;
@@ -1601,14 +1594,14 @@ mod tests {
     use arrow::datatypes::Schema;
     use serde_json::{json, Value};
 
-    fn create_test_columns(columns: Vec<(&str, &str)>) -> Option<Arc<Schema>> {
+    fn create_test_columns(columns: Vec<(&str, &str)>) -> SchemaRef {
         let mut fields = Vec::new();
         for (name, data_type) in columns {
             let arrow_type = trino_data_type_to_arrow_type(data_type).unwrap();
             fields.push(Field::new(name, arrow_type, true));
         }
 
-        Some(Arc::new(Schema::new(fields)))
+        Arc::new(Schema::new(fields))
     }
 
     fn assert_boolean_array(record_batch: &RecordBatch, column_index: usize, expected: Vec<bool>) {
@@ -2120,7 +2113,7 @@ mod tests {
     //     let rows: Vec<Vec<Value>> = vec![];
     //     let columns: Vec<TrinoColumn> = vec![];
     //
-    //     let result = rows_to_arrow(&rows, &columns).unwrap();
+    //     let result = rows_to_arrow(&rows, columns).unwrap();
     //     assert_eq!(result.num_rows(), 0);
     //     assert_eq!(result.num_columns(), 0);
     // }
@@ -2134,7 +2127,7 @@ mod tests {
             ("active", "boolean"),
         ]);
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 0);
         assert_eq!(result.num_columns(), 3);
 
@@ -2180,7 +2173,7 @@ mod tests {
             ],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 8);
 
@@ -2211,7 +2204,7 @@ mod tests {
             vec![json!(100), json!("another")],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 3);
 
         assert_int32_array_with_nulls(&result, 0, vec![Some(42), None, Some(100)]);
@@ -2246,7 +2239,7 @@ mod tests {
             json!("14:30:45.123456789"),
         ];
 
-        let result = rows_to_arrow(&[row], &columns).unwrap();
+        let result = rows_to_arrow(&[row], columns).unwrap();
 
         let t = |s| NaiveTime::parse_from_str(s, "%H:%M:%S%.f").unwrap();
 
@@ -2361,7 +2354,7 @@ mod tests {
             json!("2023-12-25 14:30:45.123456789"),
         ];
 
-        let result = rows_to_arrow(&[row], &columns).unwrap();
+        let result = rows_to_arrow(&[row], columns).unwrap();
 
         let ts = |s: &str| {
             chrono::DateTime::parse_from_rfc3339(s)
@@ -2438,7 +2431,7 @@ mod tests {
             json!("2023-12-25 15:30:45.123456789 Europe/Amsterdam"),
         ];
 
-        let result = rows_to_arrow(&[row], &columns).unwrap();
+        let result = rows_to_arrow(&[row], columns).unwrap();
 
         let ts_millis = |s: &str| {
             chrono::DateTime::parse_from_rfc3339(s)
@@ -2503,7 +2496,7 @@ mod tests {
 
         let rows = vec![vec![json!("2023-12-25")], vec![json!("1970-01-01")]];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 1);
 
@@ -2522,7 +2515,7 @@ mod tests {
         let columns = create_test_columns(vec![("date_col", "date")]);
         let rows = vec![vec![json!("invalid-date")]];
 
-        let result = rows_to_arrow(&rows, &columns);
+        let result = rows_to_arrow(&rows, columns);
         assert!(result.is_err());
     }
 
@@ -2538,7 +2531,7 @@ mod tests {
             vec![json!("0.00"), json!("0.0000")],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 2);
 
@@ -2557,7 +2550,7 @@ mod tests {
         let columns = create_test_columns(vec![("decimal_col", "decimal(10,2)")]);
         let rows = vec![vec![json!("not-a-number")]];
 
-        let result = rows_to_arrow(&rows, &columns);
+        let result = rows_to_arrow(&rows, columns);
         assert!(result.is_err());
     }
 
@@ -2568,7 +2561,7 @@ mod tests {
         let base64_data = BASE64.encode(b"hello world");
         let rows = vec![vec![json!(base64_data)], vec![json!("plain text")]];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_binary_array(&result, 0, vec![b"hello world", b"plain text"]);
     }
@@ -2583,7 +2576,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_list_of_strings_array(
             &result,
@@ -2606,7 +2599,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_list_of_integers_array(
             &result,
@@ -2626,7 +2619,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_list_of_strings_array(
             &result,
@@ -2651,7 +2644,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_list_of_strings_array(
             &result,
@@ -2677,7 +2670,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_list_of_strings_array(
             &result,
@@ -2704,7 +2697,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_struct_array(
             &result,
@@ -2731,7 +2724,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_struct_array(
             &result,
@@ -2759,7 +2752,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 4);
 
         assert_struct_array(
@@ -2790,7 +2783,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
 
         assert_struct_array(
             &result,
@@ -2818,7 +2811,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 3);
 
         assert_string_array_with_nulls(
@@ -2842,7 +2835,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 3);
 
         assert_string_array_with_nulls(
@@ -2871,7 +2864,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 3);
 
         assert_string_array_with_nulls(
@@ -2895,7 +2888,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 3);
 
         assert_string_array_with_nulls(
@@ -2923,7 +2916,7 @@ mod tests {
             json!(9223372036854775807i64),
         ]];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 1);
 
         let int8_array = result
@@ -2962,7 +2955,7 @@ mod tests {
             json!(42),
         ]];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 1);
 
         let bool_array = result
@@ -2997,7 +2990,7 @@ mod tests {
             rows.push(vec![json!(i), json!(format!("value_{}", i))]);
         }
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 1000);
         assert_eq!(result.num_columns(), 2);
 
@@ -3031,7 +3024,7 @@ mod tests {
             vec![json!(5), json!("fifth")],
         ];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 5);
 
         let int_array = result
@@ -3056,7 +3049,7 @@ mod tests {
         let columns = create_test_columns(vec![("null_col", "null")]);
         let rows = vec![vec![Value::Null], vec![Value::Null]];
 
-        let result = rows_to_arrow(&rows, &columns).unwrap();
+        let result = rows_to_arrow(&rows, columns).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 1);
 

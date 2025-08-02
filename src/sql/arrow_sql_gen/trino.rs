@@ -41,7 +41,4 @@ pub enum Error {
 
     #[snafu(display("Failed to compile regex pattern: {}", source))]
     RegexError { source: regex::Error },
-
-    #[snafu(display("No schema was provided"))]
-    NoSchema,
 }
