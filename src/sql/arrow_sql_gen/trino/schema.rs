@@ -12,7 +12,7 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
         let time_unit = time_unit_from_precision(extract_precision(&normalized_type, "time")?);
 
         return match time_unit {
-            TimeUnit::Millisecond => Ok(DataType::Time32(TimeUnit::Millisecond)),
+            TimeUnit::Second | TimeUnit::Millisecond => Ok(DataType::Time32(TimeUnit::Millisecond)),
             time_unit => Ok(DataType::Time64(time_unit)),
         };
     }

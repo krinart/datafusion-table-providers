@@ -65,7 +65,7 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         DataType::LargeUtf8 => Ok(Box::new(LargeStringBuilder::with_capacity(capacity, 1024))),
         DataType::Binary => Ok(Box::new(BinaryBuilder::with_capacity(capacity, 1024))),
         DataType::Date32 => Ok(Box::new(Date32Builder::with_capacity(capacity))),
-        DataType::Time32(TimeUnit::Millisecond) => {
+        DataType::Time32(TimeUnit::Second | TimeUnit::Millisecond) => {
             Ok(Box::new(Time32MillisecondBuilder::with_capacity(capacity)))
         }
         DataType::Time64(TimeUnit::Microsecond) => {
@@ -74,15 +74,20 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         DataType::Time64(TimeUnit::Nanosecond) => {
             Ok(Box::new(Time64NanosecondBuilder::with_capacity(capacity)))
         }
-        DataType::Timestamp(TimeUnit::Millisecond, tz_opt) => Ok(Box::new(
-            TimestampMillisecondBuilder::with_capacity(capacity).with_timezone_opt(tz_opt.clone()),
-        )),
-        DataType::Timestamp(TimeUnit::Microsecond, tz_opt) => Ok(Box::new(
-            TimestampMicrosecondBuilder::with_capacity(capacity).with_timezone_opt(tz_opt.clone()),
-        )),
-        DataType::Timestamp(TimeUnit::Nanosecond, tz_opt) => Ok(Box::new(
-            TimestampNanosecondBuilder::with_capacity(capacity).with_timezone_opt(tz_opt.clone()),
-        )),
+        DataType::Timestamp(time_unit, tz_opt) => match time_unit {
+            TimeUnit::Second | TimeUnit::Millisecond => Ok(Box::new(
+                TimestampMillisecondBuilder::with_capacity(capacity)
+                    .with_timezone_opt(tz_opt.clone()),
+            )),
+            TimeUnit::Microsecond => Ok(Box::new(
+                TimestampMicrosecondBuilder::with_capacity(capacity)
+                    .with_timezone_opt(tz_opt.clone()),
+            )),
+            TimeUnit::Nanosecond => Ok(Box::new(
+                TimestampNanosecondBuilder::with_capacity(capacity)
+                    .with_timezone_opt(tz_opt.clone()),
+            )),
+        },
         DataType::Decimal128(precision, scale) => {
             let builder = Decimal128BuilderWrapper::new(capacity, *precision, *scale)
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
@@ -793,8 +798,8 @@ pub fn append_timestamp_millisecond_value(
         Some(Value::String(timestamp_str)) => {
             let ts = timestamp_str.trim();
 
-            if let Some(utc_millis) = parse_timestamp_with_timezone(ts)? {
-                builder.append_value(utc_millis);
+            if let Some(utc_dt) = parse_timestamp_to_utc_datetime(ts)? {
+                builder.append_value(utc_dt.timestamp_millis());
             } else {
                 return Err(Error::InvalidTimestampValue {
                     value: ts.to_string(),
@@ -864,14 +869,6 @@ pub fn append_timestamp_nanosecond_value(
     Ok(())
 }
 
-fn parse_timestamp_with_timezone(ts: &str) -> Result<Option<i64>> {
-    if let Some(utc_dt) = parse_timestamp_to_utc_datetime(ts)? {
-        Ok(Some(utc_dt.timestamp_millis()))
-    } else {
-        Ok(None)
-    }
-}
-
 fn parse_timestamp_to_utc_datetime(ts: &str) -> Result<Option<DateTime<Utc>>> {
     // 1. Try parsing with IANA timezone (e.g., "2023-12-25 15:30:00 America/New_York")
     if let Some((datetime_part, tz_part)) = ts.rsplit_once(' ') {
@@ -892,15 +889,8 @@ fn parse_timestamp_to_utc_datetime(ts: &str) -> Result<Option<DateTime<Utc>>> {
         }
     }
 
-    // 2. Handle special case: normalize " UTC" to "+00:00"
-    let normalized_ts = if ts.ends_with(" UTC") {
-        ts.replace(" UTC", " +00:00")
-    } else {
-        ts.to_string()
-    };
-
     // 3. Try parsing with numeric timezone offset (e.g., "+05:30", "-08:00")
-    if let Ok(dt_with_tz) = DateTime::parse_from_str(&normalized_ts, "%Y-%m-%d %H:%M:%S%.f %z") {
+    if let Ok(dt_with_tz) = DateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S%.f %z") {
         let utc_dt = dt_with_tz.with_timezone(&Utc);
         return Ok(Some(utc_dt));
     }
