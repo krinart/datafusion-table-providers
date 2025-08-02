@@ -3,10 +3,9 @@ use arrow::{
     array::{
         ArrayBuilder, ArrayRef, BinaryBuilder, BooleanBuilder, Date32Builder, Decimal128Builder,
         Decimal256Builder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
-        Int64Builder, Int8Builder, ListBuilder, NullBuilder, RecordBatch,
-        StringBuilder, StructBuilder, Time32MillisecondBuilder, Time64MicrosecondBuilder,
-        Time64NanosecondBuilder, TimestampMicrosecondBuilder, TimestampMillisecondBuilder,
-        TimestampNanosecondBuilder,
+        Int64Builder, Int8Builder, ListBuilder, NullBuilder, RecordBatch, StringBuilder,
+        StructBuilder, Time32MillisecondBuilder, Time64MicrosecondBuilder, Time64NanosecondBuilder,
+        TimestampMicrosecondBuilder, TimestampMillisecondBuilder, TimestampNanosecondBuilder,
     },
     datatypes::{i256, DataType, Date32Type, Field, Fields, TimeUnit},
 };
@@ -291,18 +290,21 @@ fn create_list_builder_for_field(
         }
         DataType::Timestamp(time_unit, tz_opt) => match time_unit {
             TimeUnit::Second | TimeUnit::Millisecond => {
-                let values_builder = TimestampMillisecondBuilder::with_capacity(capacity * 4).with_timezone_opt(tz_opt.clone());
+                let values_builder = TimestampMillisecondBuilder::with_capacity(capacity * 4)
+                    .with_timezone_opt(tz_opt.clone());
                 Ok(Box::new(ListBuilder::new(values_builder)))
             }
             TimeUnit::Microsecond => {
-                let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4).with_timezone_opt(tz_opt.clone());
+                let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4)
+                    .with_timezone_opt(tz_opt.clone());
                 Ok(Box::new(ListBuilder::new(values_builder)))
             }
             TimeUnit::Nanosecond => {
-                let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4).with_timezone_opt(tz_opt.clone());
+                let values_builder = TimestampMicrosecondBuilder::with_capacity(capacity * 4)
+                    .with_timezone_opt(tz_opt.clone());
                 Ok(Box::new(ListBuilder::new(values_builder)))
             }
-        }
+        },
         DataType::Decimal128(precision, scale) => {
             let values_builder = Decimal128BuilderWrapper::new(capacity * 4, *precision, *scale)
                 .map_err(|e| Error::FailedToBuildRecordBatch { source: e })?;
@@ -533,7 +535,7 @@ fn append_value_to_builder(
             return Err(Error::UnsupportedArrowType {
                 arrow_type: arrow_type.to_string(),
             });
-        },
+        }
     }
     Ok(())
 }
@@ -1538,7 +1540,7 @@ mod tests {
     fn create_test_schema(columns: Vec<(&str, &str)>) -> SchemaRef {
         let mut fields = Vec::new();
         for (name, data_type) in columns {
-            let arrow_type = trino_data_type_to_arrow_type(data_type).unwrap();
+            let arrow_type = trino_data_type_to_arrow_type(data_type, None).unwrap();
             fields.push(Field::new(name, arrow_type, true));
         }
 

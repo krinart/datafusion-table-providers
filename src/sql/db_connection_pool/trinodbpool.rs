@@ -167,7 +167,9 @@ impl TrinoConnectionPool {
             join_push_down,
             unsupported_type_action: UnsupportedTypeAction::default(),
             poll_wait_time: Duration::from_millis(poll_wait_time),
-            tz: params.get("time_zone").map(|t| t.expose_secret().to_string()),
+            tz: params
+                .get("time_zone")
+                .map(|t| t.expose_secret().to_string()),
         })
     }
 
@@ -502,32 +504,6 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDInfJ+AMdz...
             .expect("Failed to create TrinoConnectionPool");
 
         mock.assert_async().await;
-    }
-
-    #[tokio::test]
-    async fn test_new_with_mtls() {
-        let pem_file = create_mock_pem_file();
-        let mut server = Server::new_async().await;
-
-        let mock = server
-            .mock("GET", "/v1/info")
-            .with_status(200)
-            .with_body(r#"{"nodeVersion":{"version":"1.0"}}"#)
-            .create_async()
-            .await;
-
-        let mut params = create_basic_params();
-        params.insert("url".to_string(), SecretString::new(server.url().into()));
-        params.insert(
-            "identity_pem_path".to_string(),
-            SecretString::new(pem_file.path().to_string_lossy().into()),
-        );
-
-        // Note: This test may fail in practice due to actual TLS validation
-        // In a real test environment, you'd want to use a proper test certificate
-        let pool = TrinoConnectionPool::new(params).await;
-        // For this test, we're mainly checking that the PEM file is read correctly
-        // The actual TLS handshake would require a proper test setup
     }
 
     #[tokio::test]

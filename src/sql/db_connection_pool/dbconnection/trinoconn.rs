@@ -92,7 +92,6 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         &self,
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
-
         let sql = format!("DESCRIBE {table_reference}");
         let mut query_stream = self.execute_query(&sql);
 
@@ -131,7 +130,9 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                         true
                     };
 
-                    let Ok(arrow_type) = trino_data_type_to_arrow_type(data_type, self.tz.clone().as_deref()) else {
+                    let Ok(arrow_type) =
+                        trino_data_type_to_arrow_type(data_type, self.tz.clone().as_deref())
+                    else {
                         return Err(super::Error::UnsupportedDataType {
                             data_type: data_type.to_string(),
                             field_name: column_name.to_string(),
