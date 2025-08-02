@@ -1,34 +1,30 @@
-use std::{any::Any, sync::Arc};
-
 use super::AsyncDbConnection;
 use super::DbConnection;
 use super::Result;
 use crate::sql::arrow_sql_gen::trino::{
-    self,
-    arrow::{rows_to_arrow, TrinoColumn},
-    schema::trino_data_type_to_arrow_type,
+    self, arrow::rows_to_arrow, schema::trino_data_type_to_arrow_type,
 };
 use crate::UnsupportedTypeAction;
 use arrow::datatypes::Field;
 use arrow::datatypes::Schema;
 use arrow::datatypes::SchemaRef;
 use async_stream::stream;
+use async_stream::try_stream;
 use datafusion::error::DataFusionError;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::sql::TableReference;
 use futures::stream;
+use futures::Stream;
 use futures::StreamExt;
 use serde_json::Value;
 use snafu::prelude::*;
+use std::pin::Pin;
 use std::time::Duration;
+use std::{any::Any, sync::Arc};
 use tokio::time::sleep;
 
-#[derive(Debug, Clone)]
-pub struct TrinoQueryResult {
-    pub data: Vec<Vec<Value>>,
-    pub columns: Vec<TrinoColumn>,
-}
+pub type QueryStream = Pin<Box<dyn Stream<Item = Result<Vec<Vec<Value>>, Error>> + Send>>;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -104,55 +100,54 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
         let sql = format!("DESCRIBE {table_reference}");
-
-        let query_result =
-            self.execute_query(&sql)
-                .await
-                .map_err(|e| super::Error::UnableToGetSchema {
-                    source: Box::new(e),
-                })?;
+        let mut query_stream = self.execute_query_stream(&sql);
 
         let mut fields = Vec::new();
 
-        for row_data in query_result.data {
-            if row_data.len() >= 2 {
-                let column_name =
-                    row_data[0]
-                        .as_str()
-                        .ok_or_else(|| super::Error::UnableToGetSchema {
-                            source: Box::new(Error::MissingFieldError {
-                                field: "column_name".to_string(),
-                            }),
-                        })?;
+        while let Some(batch_data) = query_stream.next().await {
+            let batch_data = batch_data.map_err(|e| super::Error::UnableToGetSchema {
+                source: Box::new(e),
+            })?;
 
-                let data_type =
-                    row_data[1]
-                        .as_str()
-                        .ok_or_else(|| super::Error::UnableToGetSchema {
-                            source: Box::new(Error::MissingFieldError {
-                                field: "data_type".to_string(),
-                            }),
-                        })?;
+            for row_data in batch_data {
+                if row_data.len() >= 2 {
+                    let column_name =
+                        row_data[0]
+                            .as_str()
+                            .ok_or_else(|| super::Error::UnableToGetSchema {
+                                source: Box::new(Error::MissingFieldError {
+                                    field: "column_name".to_string(),
+                                }),
+                            })?;
 
-                let nullable = if row_data.len() > 2 {
-                    row_data[2].as_str().unwrap_or("true") != "false"
-                } else {
-                    true
-                };
+                    let data_type =
+                        row_data[1]
+                            .as_str()
+                            .ok_or_else(|| super::Error::UnableToGetSchema {
+                                source: Box::new(Error::MissingFieldError {
+                                    field: "data_type".to_string(),
+                                }),
+                            })?;
 
-                let Ok(arrow_type) = trino_data_type_to_arrow_type(data_type) else {
-                    return Err(super::Error::UnsupportedDataType {
-                        data_type: data_type.to_string(),
-                        field_name: column_name.to_string(),
-                    });
-                };
+                    let nullable = if row_data.len() > 2 {
+                        row_data[2].as_str().unwrap_or("true") != "false"
+                    } else {
+                        true
+                    };
 
-                fields.push(Field::new(column_name, arrow_type, nullable));
+                    let Ok(arrow_type) = trino_data_type_to_arrow_type(data_type) else {
+                        return Err(super::Error::UnsupportedDataType {
+                            data_type: data_type.to_string(),
+                            field_name: column_name.to_string(),
+                        });
+                    };
+
+                    fields.push(Field::new(column_name, arrow_type, nullable));
+                }
             }
         }
 
         let schema = Arc::new(Schema::new(fields));
-
         Ok(schema)
     }
 
@@ -162,43 +157,41 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         _params: &[&'a str],
         projected_schema: Option<SchemaRef>,
     ) -> Result<SendableRecordBatchStream> {
-        let query_result =
-            self.execute_query(sql)
-                .await
-                .map_err(|e| super::Error::UnableToQueryArrow {
+        let mut query_stream = self.execute_query_stream(sql);
+
+        let mut arrow_stream = Box::pin(stream! {
+            while let Some(batch_data) = query_stream.next().await {
+                let batch_data = batch_data.map_err(|e| super::Error::UnableToQueryArrow {
                     source: Box::new(e),
                 })?;
 
-        let data_rows = query_result.data;
-        let columns = query_result.columns;
-
-        let mut stream = Box::pin(stream! {
-            if !data_rows.is_empty() {
-                let chunk_size = 4_000;
-                for chunk in data_rows.chunks(chunk_size) {
-                    let rec = rows_to_arrow(chunk, &projected_schema)
-                        .map_err(|e| Error::ConversionError { source: e })?;
-                    yield Ok::<_, Error>(rec);
+                if !batch_data.is_empty() {
+                    let chunk_size = 4_000;
+                    for chunk in batch_data.chunks(chunk_size) {
+                        let rec = rows_to_arrow(chunk, &projected_schema)
+                            .map_err(|e| super::Error::UnableToQueryArrow {
+                                source: Box::new(Error::ConversionError { source: e }),
+                            })?;
+                        yield Ok::<_, super::Error>(rec);
+                    }
                 }
             }
         });
 
-        let Some(first_chunk) = stream.next().await else {
+        let Some(first_chunk) = arrow_stream.next().await else {
             return Ok(Box::pin(RecordBatchStreamAdapter::new(
                 Arc::new(Schema::empty()),
                 stream::empty(),
             )));
         };
 
-        let first_chunk = first_chunk.map_err(|e| super::Error::UnableToQueryArrow {
-            source: Box::new(e),
-        })?;
+        let first_chunk = first_chunk?;
         let schema = first_chunk.schema();
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, {
             stream! {
                 yield Ok(first_chunk);
-                while let Some(batch) = stream.next().await {
+                while let Some(batch) = arrow_stream.next().await {
                     yield batch
                         .map_err(|e| DataFusionError::Execution(format!("Failed to fetch batch: {e}")))
                 }
@@ -206,8 +199,8 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         })))
     }
 
-    async fn execute(&self, query: &str, _params: &[&'a str]) -> Result<u64> {
-        Ok(100)
+    async fn execute(&self, _query: &str, _params: &[&'a str]) -> Result<u64> {
+        todo!()
     }
 }
 
@@ -231,118 +224,73 @@ impl TrinoConnection {
         self
     }
 
-    async fn execute_query(&self, sql: &str) -> Result<TrinoQueryResult, Error> {
+    fn execute_query_stream(&self, sql: &str) -> QueryStream {
+        let client = self.client.clone();
         let url = format!("{}/v1/statement", self.base_url);
+        let poll_wait_time = self.poll_wait_time;
+        let sql = sql.to_string();
 
-        let response = self
-            .client
-            .clone()
-            .post(&url)
-            .body(sql.to_string())
-            .send()
-            .await
-            .context(QuerySnafu)?;
+        Box::pin(try_stream! {
+            let mut result: Value = client
+                .post(&url)
+                .body(sql)
+                .send()
+                .await
+                .context(QuerySnafu)?
+                .json()
+                .await
+                .context(QuerySnafu)?;
 
-        if !response.status().is_success() {
-            let status_code = response.status().as_u16();
-            let message = response.text().await.unwrap_or_default();
+            loop {
+                let state = result["stats"]["state"].as_str().unwrap_or("");
 
-            return if status_code == 401 {
-                Err(Error::AuthenticationFailedError)
-            } else {
-                Err(Error::TrinoServerError {
-                    status_code,
-                    message,
-                })
-            };
-        }
-
-        let mut result: Value = response.json().await.context(QuerySnafu)?;
-        let mut all_data: Vec<Vec<Value>> = Vec::new();
-        let mut columns: Vec<TrinoColumn> = Vec::new();
-
-        loop {
-            if columns.is_empty() {
-                if let Some(cols) = result.get("columns").and_then(|c| c.as_array()) {
-                    for col in cols {
-                        if let Some(col_obj) = col.as_object() {
-                            let name = col_obj
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-
-                            let type_name = col_obj
-                                .get("type")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("varchar")
-                                .to_string();
-
-                            columns.push(TrinoColumn { name, type_name });
-                        }
-                    }
-                }
-            }
-
-            let state = result["stats"]["state"].as_str().unwrap_or("");
-
-            if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
-                for row in data {
-                    if let Some(row_array) = row.as_array() {
-                        all_data.push(row_array.clone());
-                    }
-                }
-            }
-
-            if state == "FINISHED" {
-                break;
-            } else if state == "FAILED" {
-                return Err(Error::TrinoServerError {
-                    status_code: 500,
-                    message: "Query failed".to_string(),
-                });
-            } else if state == "CANCELED" {
-                return Err(Error::TrinoServerError {
-                    status_code: 499,
-                    message: "Query was canceled".to_string(),
-                });
-            }
-
-            if let Some(next_uri) = result.get("nextUri").and_then(|u| u.as_str()) {
-                sleep(self.poll_wait_time).await;
-
-                let response = self
-                    .client
-                    .clone()
-                    .get(next_uri)
-                    .send()
-                    .await
-                    .context(QuerySnafu)?;
-
-                if !response.status().is_success() {
-                    let status_code = response.status().as_u16();
-                    let message = response.text().await.unwrap_or_default();
-                    return Err(Error::TrinoServerError {
-                        status_code,
-                        message,
-                    });
-                }
-
-                result = response.json().await.context(QuerySnafu)?;
-            } else {
-                if state != "FINISHED" {
-                    return Err(Error::TrinoServerError {
+                if state == "FAILED" {
+                    Err(Error::TrinoServerError {
                         status_code: 500,
-                        message: format!("Query stuck in state: {state}"),
-                    });
+                        message: "Query failed".to_string(),
+                    })?;
+                } else if state == "CANCELED" {
+                    Err(Error::TrinoServerError {
+                        status_code: 499,
+                        message: "Query was canceled".to_string(),
+                    })?;
                 }
-                break;
-            }
-        }
 
-        Ok(TrinoQueryResult {
-            data: all_data,
-            columns,
+                if let Some(data) = result.get("data").and_then(|d| d.as_array()) {
+                    let batch_data = data.iter()
+                        .filter_map(|row| row.as_array().cloned())
+                        .collect::<Vec<_>>();
+
+                    if !batch_data.is_empty() {
+                        yield batch_data;
+                    }
+                }
+
+                if state == "FINISHED" {
+                    break;
+                }
+
+                if let Some(next_uri) = result.get("nextUri").and_then(|u| u.as_str()) {
+                    sleep(poll_wait_time).await;
+
+                    result = client
+                        .get(next_uri)
+                        .send()
+                        .await
+                        .context(QuerySnafu)?
+                        .json()
+                        .await
+                        .context(QuerySnafu)?;
+                } else {
+                    if state != "FINISHED" {
+                        Err(Error::TrinoServerError {
+                            status_code: 500,
+                            message: format!("Query stuck in state: {}", state),
+                        })?;
+                    }
+                    break;
+                }
+            }
         })
     }
 }

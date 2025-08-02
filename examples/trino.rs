@@ -5,7 +5,6 @@ use datafusion::sql::TableReference;
 use datafusion_table_providers::sql::db_connection_pool::trinodbpool::TrinoConnectionPool;
 use datafusion_table_providers::trino::TrinoTableFactory;
 use datafusion_table_providers::util::secrets::to_secret_map;
-use datafusion_table_providers::UnsupportedTypeAction;
 
 /// This example demonstrates how to:
 /// 1. Create a Trino connection pool

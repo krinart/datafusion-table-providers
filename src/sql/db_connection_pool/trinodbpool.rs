@@ -11,7 +11,7 @@ use super::DbConnectionPool;
 use crate::sql::db_connection_pool::dbconnection::trinoconn::DEFAULT_POLL_WAIT_TIME_MS;
 use crate::{
     sql::db_connection_pool::{
-        dbconnection::{trinoconn::TrinoConnection, AsyncDbConnection, DbConnection},
+        dbconnection::{trinoconn::TrinoConnection, DbConnection},
         JoinPushDown,
     },
     util::{self, ns_lookup::verify_ns_lookup_and_tcp_connect},

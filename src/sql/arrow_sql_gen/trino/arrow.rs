@@ -1,15 +1,14 @@
 use super::{Error, FailedToBuildRecordBatchSnafu, Result};
-use crate::sql::arrow_sql_gen::trino::schema::trino_data_type_to_arrow_type;
 use arrow::{
     array::{
         ArrayBuilder, ArrayRef, BinaryBuilder, BooleanBuilder, Date32Builder, Decimal128Builder,
         Decimal256Builder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
-        Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder, MapBuilder, NullBuilder,
-        RecordBatch, StringBuilder, StructBuilder, Time32MillisecondBuilder,
-        Time64MicrosecondBuilder, Time64NanosecondBuilder, TimestampMicrosecondBuilder,
-        TimestampMillisecondBuilder, TimestampNanosecondBuilder,
+        Int64Builder, Int8Builder, LargeStringBuilder, ListBuilder, NullBuilder, RecordBatch,
+        StringBuilder, StructBuilder, Time32MillisecondBuilder, Time64MicrosecondBuilder,
+        Time64NanosecondBuilder, TimestampMicrosecondBuilder, TimestampMillisecondBuilder,
+        TimestampNanosecondBuilder,
     },
-    datatypes::{i256, DataType, Date32Type, Field, Fields, Schema, TimeUnit},
+    datatypes::{i256, DataType, Date32Type, Field, Fields, TimeUnit},
 };
 use arrow_schema::{ArrowError, SchemaRef};
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -23,12 +22,6 @@ use snafu::ResultExt;
 use std::any::Any;
 use std::str::FromStr;
 use std::{collections::HashMap, sync::Arc};
-
-#[derive(Debug, Clone)]
-pub struct TrinoColumn {
-    pub name: String,
-    pub type_name: String,
-}
 
 pub fn rows_to_arrow(rows: &[Vec<Value>], schema: &Option<SchemaRef>) -> Result<RecordBatch> {
     let schema_ref = match schema {
@@ -51,83 +44,6 @@ pub fn rows_to_arrow(rows: &[Vec<Value>], schema: &Option<SchemaRef>) -> Result<
     let arrays = finish_builders(builders, schema_ref)?;
 
     RecordBatch::try_new(Arc::clone(schema_ref), arrays).context(FailedToBuildRecordBatchSnafu)
-}
-
-fn build_schema_from_columns(columns: &[TrinoColumn]) -> Result<Schema> {
-    let mut fields = Vec::new();
-
-    for column in columns {
-        let arrow_type = trino_data_type_to_arrow_type(&column.type_name)?;
-        fields.push(Field::new(&column.name, arrow_type, true));
-    }
-
-    Ok(Schema::new(fields))
-}
-
-fn create_empty_array(data_type: &DataType) -> ArrayRef {
-    match data_type {
-        DataType::Boolean => Arc::new(BooleanBuilder::new().finish()),
-        DataType::Int8 => Arc::new(Int8Builder::new().finish()),
-        DataType::Int16 => Arc::new(Int16Builder::new().finish()),
-        DataType::Int32 => Arc::new(Int32Builder::new().finish()),
-        DataType::Int64 => Arc::new(Int64Builder::new().finish()),
-        DataType::Float32 => Arc::new(Float32Builder::new().finish()),
-        DataType::Float64 => Arc::new(Float64Builder::new().finish()),
-        DataType::Utf8 => Arc::new(StringBuilder::new().finish()),
-        DataType::LargeUtf8 => Arc::new(LargeStringBuilder::new().finish()),
-        DataType::Binary => Arc::new(BinaryBuilder::new().finish()),
-        DataType::Date32 => Arc::new(Date32Builder::new().finish()),
-        DataType::Time32(TimeUnit::Millisecond) => {
-            Arc::new(Time32MillisecondBuilder::new().finish())
-        }
-        DataType::Time64(TimeUnit::Microsecond) => {
-            Arc::new(Time64MicrosecondBuilder::new().finish())
-        }
-        DataType::Time64(TimeUnit::Nanosecond) => Arc::new(Time64NanosecondBuilder::new().finish()),
-        DataType::Timestamp(TimeUnit::Microsecond, tz_opt) => Arc::new(
-            TimestampMicrosecondBuilder::new()
-                .with_timezone_opt(tz_opt.clone())
-                .finish(),
-        ),
-        DataType::Timestamp(TimeUnit::Millisecond, tz_opt) => Arc::new(
-            TimestampMillisecondBuilder::new()
-                .with_timezone_opt(tz_opt.clone())
-                .finish(),
-        ),
-        DataType::Timestamp(TimeUnit::Nanosecond, tz_opt) => Arc::new(
-            TimestampNanosecondBuilder::new()
-                .with_timezone_opt(tz_opt.clone())
-                .finish(),
-        ),
-        DataType::Decimal128(precision, scale) => Arc::new(Decimal128Builder::new().finish()),
-        DataType::Decimal256(_, _) => Arc::new(Decimal256Builder::new().finish()),
-        DataType::List(_) => {
-            let values_builder: Box<dyn ArrayBuilder> = Box::new(StringBuilder::new());
-            Arc::new(ListBuilder::new(values_builder).finish())
-        }
-        DataType::Struct(fields) => {
-            let arrays: Vec<ArrayRef> = fields
-                .iter()
-                .map(|field| create_empty_array(field.data_type()))
-                .collect();
-            Arc::new(arrow::array::StructArray::try_new(fields.clone(), arrays, None).unwrap())
-        }
-        DataType::Map(field, _) => {
-            if let DataType::Struct(struct_fields) = field.data_type() {
-                if struct_fields.len() == 2 {
-                    let key_builder: Box<dyn ArrayBuilder> = Box::new(StringBuilder::new());
-                    let value_builder: Box<dyn ArrayBuilder> = Box::new(StringBuilder::new());
-                    Arc::new(MapBuilder::new(None, key_builder, value_builder).finish())
-                } else {
-                    Arc::new(StringBuilder::new().finish())
-                }
-            } else {
-                Arc::new(StringBuilder::new().finish())
-            }
-        }
-        DataType::Null => Arc::new(NullBuilder::new().finish()),
-        _ => Arc::new(StringBuilder::new().finish()),
-    }
 }
 
 type BuilderMap = HashMap<String, Box<dyn ArrayBuilder>>;
@@ -192,7 +108,7 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             }
             Ok(Box::new(StructBuilder::new(fields.clone(), field_builders)))
         }
-        DataType::Map(field, _) => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
+        DataType::Map(_, _) => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
         DataType::Null => Ok(Box::new(NullBuilder::new())),
         _ => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
     }
@@ -222,14 +138,6 @@ impl Decimal128BuilderWrapper {
 
     fn append_null(&mut self) {
         self.inner.append_null();
-    }
-
-    fn precision(&self) -> u8 {
-        self.precision
-    }
-
-    fn scale(&self) -> i8 {
-        self.scale
     }
 
     fn data_type(&self) -> DataType {
@@ -287,14 +195,6 @@ impl Decimal256BuilderWrapper {
 
     fn append_null(&mut self) {
         self.inner.append_null();
-    }
-
-    fn precision(&self) -> u8 {
-        self.precision
-    }
-
-    fn scale(&self) -> i8 {
-        self.scale
     }
 
     fn data_type(&self) -> DataType {
@@ -1423,74 +1323,6 @@ fn append_array_to_list_builder(builder: &mut dyn ArrayBuilder, arr: &Vec<Value>
     Ok(())
 }
 
-fn append_null_to_any_builder(builder: &mut dyn ArrayBuilder) {
-    if let Some(bool_builder) = builder.as_any_mut().downcast_mut::<BooleanBuilder>() {
-        bool_builder.append_null();
-    } else if let Some(i8_builder) = builder.as_any_mut().downcast_mut::<Int8Builder>() {
-        i8_builder.append_null();
-    } else if let Some(i16_builder) = builder.as_any_mut().downcast_mut::<Int16Builder>() {
-        i16_builder.append_null();
-    } else if let Some(i32_builder) = builder.as_any_mut().downcast_mut::<Int32Builder>() {
-        i32_builder.append_null();
-    } else if let Some(i64_builder) = builder.as_any_mut().downcast_mut::<Int64Builder>() {
-        i64_builder.append_null();
-    } else if let Some(f32_builder) = builder.as_any_mut().downcast_mut::<Float32Builder>() {
-        f32_builder.append_null();
-    } else if let Some(f64_builder) = builder.as_any_mut().downcast_mut::<Float64Builder>() {
-        f64_builder.append_null();
-    } else if let Some(string_builder) = builder.as_any_mut().downcast_mut::<StringBuilder>() {
-        string_builder.append_null();
-    } else if let Some(large_string_builder) =
-        builder.as_any_mut().downcast_mut::<LargeStringBuilder>()
-    {
-        large_string_builder.append_null();
-    } else if let Some(binary_builder) = builder.as_any_mut().downcast_mut::<BinaryBuilder>() {
-        binary_builder.append_null();
-    } else if let Some(date_builder) = builder.as_any_mut().downcast_mut::<Date32Builder>() {
-        date_builder.append_null();
-    } else if let Some(time_builder) = builder
-        .as_any_mut()
-        .downcast_mut::<Time32MillisecondBuilder>()
-    {
-        time_builder.append_null();
-    } else if let Some(time_builder) = builder
-        .as_any_mut()
-        .downcast_mut::<Time64MicrosecondBuilder>()
-    {
-        time_builder.append_null();
-    } else if let Some(time_builder) = builder
-        .as_any_mut()
-        .downcast_mut::<Time64NanosecondBuilder>()
-    {
-        time_builder.append_null();
-    } else if let Some(timestamp_builder) = builder
-        .as_any_mut()
-        .downcast_mut::<TimestampMillisecondBuilder>()
-    {
-        timestamp_builder.append_null();
-    } else if let Some(timestamp_builder) = builder
-        .as_any_mut()
-        .downcast_mut::<TimestampMicrosecondBuilder>()
-    {
-        timestamp_builder.append_null();
-    } else if let Some(timestamp_builder) = builder
-        .as_any_mut()
-        .downcast_mut::<TimestampNanosecondBuilder>()
-    {
-        timestamp_builder.append_null();
-    } else if let Some(decimal128_builder) =
-        builder.as_any_mut().downcast_mut::<Decimal128Builder>()
-    {
-        decimal128_builder.append_null();
-    } else if let Some(decimal256_builder) =
-        builder.as_any_mut().downcast_mut::<Decimal256Builder>()
-    {
-        decimal256_builder.append_null();
-    } else if let Some(null_builder) = builder.as_any_mut().downcast_mut::<NullBuilder>() {
-        null_builder.append_null();
-    }
-}
-
 fn finish_builders(mut builders: BuilderMap, schema: &SchemaRef) -> Result<Vec<ArrayRef>> {
     let mut arrays = Vec::new();
 
@@ -1764,7 +1596,9 @@ fn append_struct_value(
 mod tests {
     use super::*;
 
+    use crate::sql::arrow_sql_gen::trino::schema::trino_data_type_to_arrow_type;
     use arrow::array::*;
+    use arrow::datatypes::Schema;
     use serde_json::{json, Value};
 
     fn create_test_columns(columns: Vec<(&str, &str)>) -> Option<Arc<Schema>> {
