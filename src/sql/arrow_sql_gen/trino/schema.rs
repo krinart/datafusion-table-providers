@@ -47,7 +47,6 @@ pub(crate) fn trino_data_type_to_arrow_type(trino_type: &str) -> Result<DataType
         _ if normalized_type.starts_with("char") => Ok(DataType::Utf8),
         _ if normalized_type.starts_with("varbinary") => Ok(DataType::Binary),
         _ if normalized_type.starts_with("array") => parse_array_type(&normalized_type),
-        _ if normalized_type.starts_with("map") => Ok(DataType::Utf8),
         _ if normalized_type.starts_with("row") => parse_row_type(&normalized_type),
         _ => Err(Error::UnsupportedTrinoType {
             trino_type: trino_type.to_string(),
@@ -508,30 +507,20 @@ mod tests {
 
         // Array of maps becomes array of strings
         assert_eq!(
-            trino_data_type_to_arrow_type("array(map(varchar, integer))").unwrap(),
-            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)))
-        );
-
-        // Array of maps becomes array of strings
-        assert_eq!(
             trino_data_type_to_arrow_type("array(row(name varchar, age integer))").unwrap(),
             DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)))
         );
+
+        // Array of maps is not supported
+        let res = trino_data_type_to_arrow_type("array(map(varchar, integer))");
+        assert!(res.is_err());
     }
 
     #[test]
     fn test_map_types() {
-        // Maps are represented as strings
-
-        assert_eq!(
-            trino_data_type_to_arrow_type("map(varchar, integer)").unwrap(),
-            DataType::Utf8,
-        );
-
-        assert_eq!(
-            trino_data_type_to_arrow_type("map(integer, double)").unwrap(),
-            DataType::Utf8,
-        );
+        // Maps are not supported
+        let res = trino_data_type_to_arrow_type("map(varchar, integer)");
+        assert!(res.is_err())
     }
 
     #[test]
@@ -576,15 +565,9 @@ mod tests {
 
     #[test]
     fn test_row_type_with_map() {
-        let expected_row_array = DataType::Struct(Fields::from(vec![
-            Field::new("name", DataType::Utf8, true),
-            Field::new("scores", DataType::Utf8, true),
-        ]));
-        assert_eq!(
-            trino_data_type_to_arrow_type("row(name varchar, scores map(varchar, integer))")
-                .unwrap(),
-            expected_row_array
-        );
+        // row of maps is not supported
+        let res = trino_data_type_to_arrow_type("row(name varchar, scores map(varchar, integer))");
+        assert!(res.is_err());
     }
 
     #[test]

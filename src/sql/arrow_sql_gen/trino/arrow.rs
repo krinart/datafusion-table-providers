@@ -106,7 +106,6 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
             }
             Ok(Box::new(StructBuilder::new(fields.clone(), field_builders)))
         }
-        DataType::Map(_, _) => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
         DataType::Null => Ok(Box::new(NullBuilder::new())),
         _ => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
     }
@@ -1584,7 +1583,7 @@ mod tests {
     use arrow::datatypes::Schema;
     use serde_json::{json, Value};
 
-    fn create_test_columns(columns: Vec<(&str, &str)>) -> SchemaRef {
+    fn create_test_schema(columns: Vec<(&str, &str)>) -> SchemaRef {
         let mut fields = Vec::new();
         for (name, data_type) in columns {
             let arrow_type = trino_data_type_to_arrow_type(data_type).unwrap();
@@ -2098,26 +2097,26 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_empty_rows_empty_columns() {
-    //     let rows: Vec<Vec<Value>> = vec![];
-    //     let columns: Vec<TrinoColumn> = vec![];
-    //
-    //     let result = rows_to_arrow(&rows, columns).unwrap();
-    //     assert_eq!(result.num_rows(), 0);
-    //     assert_eq!(result.num_columns(), 0);
-    // }
+    #[test]
+    fn test_empty_rows_empty_schema() {
+        let rows: Vec<Vec<Value>> = vec![];
+        let schema = create_test_schema(vec![]);
+
+        let result = rows_to_arrow(&rows, schema).unwrap();
+        assert_eq!(result.num_rows(), 0);
+        assert_eq!(result.num_columns(), 0);
+    }
 
     #[test]
     fn test_empty_rows_with_columns() {
         let rows: Vec<Vec<Value>> = vec![];
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("id", "bigint"),
             ("name", "varchar"),
             ("active", "boolean"),
         ]);
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 0);
         assert_eq!(result.num_columns(), 3);
 
@@ -2129,7 +2128,7 @@ mod tests {
 
     #[test]
     fn test_basic_data_types() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("bool_col", "boolean"),
             ("int8_col", "tinyint"),
             ("int16_col", "smallint"),
@@ -2163,7 +2162,7 @@ mod tests {
             ],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 8);
 
@@ -2183,7 +2182,7 @@ mod tests {
 
     #[test]
     fn test_null_values() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("nullable_int", "integer"),
             ("nullable_string", "varchar"),
         ]);
@@ -2194,7 +2193,7 @@ mod tests {
             vec![json!(100), json!("another")],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 3);
 
         assert_int32_array_with_nulls(&result, 0, vec![Some(42), None, Some(100)]);
@@ -2203,7 +2202,7 @@ mod tests {
 
     #[test]
     fn test_time() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("col0", "time(0)"),
             ("col1", "time(1)"),
             ("col2", "time(2)"),
@@ -2229,7 +2228,7 @@ mod tests {
             json!("14:30:45.123456789"),
         ];
 
-        let result = rows_to_arrow(&[row], columns).unwrap();
+        let result = rows_to_arrow(&[row], schema).unwrap();
 
         let t = |s| NaiveTime::parse_from_str(s, "%H:%M:%S%.f").unwrap();
 
@@ -2318,7 +2317,7 @@ mod tests {
 
     #[test]
     fn test_timestamp() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("col0", "timestamp(0)"),
             ("col1", "timestamp(1)"),
             ("col2", "timestamp(2)"),
@@ -2344,7 +2343,7 @@ mod tests {
             json!("2023-12-25 14:30:45.123456789"),
         ];
 
-        let result = rows_to_arrow(&[row], columns).unwrap();
+        let result = rows_to_arrow(&[row], schema).unwrap();
 
         let ts = |s: &str| {
             chrono::DateTime::parse_from_rfc3339(s)
@@ -2395,7 +2394,7 @@ mod tests {
 
     #[test]
     fn test_timestamp_with_timezone() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("col0", "timestamp(0) with time zone"),
             ("col1", "timestamp(1) with time zone"),
             ("col2", "timestamp(2) with time zone"),
@@ -2421,7 +2420,7 @@ mod tests {
             json!("2023-12-25 15:30:45.123456789 Europe/Amsterdam"),
         ];
 
-        let result = rows_to_arrow(&[row], columns).unwrap();
+        let result = rows_to_arrow(&[row], schema).unwrap();
 
         let ts_millis = |s: &str| {
             chrono::DateTime::parse_from_rfc3339(s)
@@ -2482,11 +2481,11 @@ mod tests {
 
     #[test]
     fn test_date() {
-        let columns = create_test_columns(vec![("date_col", "date")]);
+        let schema = create_test_schema(vec![("date_col", "date")]);
 
         let rows = vec![vec![json!("2023-12-25")], vec![json!("1970-01-01")]];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 1);
 
@@ -2502,16 +2501,16 @@ mod tests {
 
     #[test]
     fn test_invalid_date_format() {
-        let columns = create_test_columns(vec![("date_col", "date")]);
+        let schema = create_test_schema(vec![("date_col", "date")]);
         let rows = vec![vec![json!("invalid-date")]];
 
-        let result = rows_to_arrow(&rows, columns);
+        let result = rows_to_arrow(&rows, schema);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_decimal_types() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("decimal128_col", "decimal(10,2)"),
             ("decimal256_col", "decimal(42,4)"),
         ]);
@@ -2521,7 +2520,7 @@ mod tests {
             vec![json!("0.00"), json!("0.0000")],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 2);
 
@@ -2537,28 +2536,28 @@ mod tests {
 
     #[test]
     fn test_invalid_decimal_format() {
-        let columns = create_test_columns(vec![("decimal_col", "decimal(10,2)")]);
+        let schema = create_test_schema(vec![("decimal_col", "decimal(10,2)")]);
         let rows = vec![vec![json!("not-a-number")]];
 
-        let result = rows_to_arrow(&rows, columns);
+        let result = rows_to_arrow(&rows, schema);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_binary_data() {
-        let columns = create_test_columns(vec![("binary_col", "varbinary")]);
+        let schema = create_test_schema(vec![("binary_col", "varbinary")]);
 
         let base64_data = BASE64.encode(b"hello world");
         let rows = vec![vec![json!(base64_data)], vec![json!("plain text")]];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_binary_array(&result, 0, vec![b"hello world", b"plain text"]);
     }
 
     #[test]
     fn test_list_of_strings() {
-        let columns = create_test_columns(vec![("list_col", "array(varchar)")]);
+        let schema = create_test_schema(vec![("list_col", "array(varchar)")]);
 
         let rows = vec![
             vec![json!(["item1", "item2", "item3"])],
@@ -2566,7 +2565,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_list_of_strings_array(
             &result,
@@ -2581,7 +2580,7 @@ mod tests {
 
     #[test]
     fn test_list_of_integers() {
-        let columns = create_test_columns(vec![("list_col", "array(integer)")]);
+        let schema = create_test_schema(vec![("list_col", "array(integer)")]);
 
         let rows = vec![
             vec![json!([100, 200, 300])],
@@ -2589,7 +2588,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_list_of_integers_array(
             &result,
@@ -2600,7 +2599,7 @@ mod tests {
 
     #[test]
     fn test_list_of_lists() {
-        let columns = create_test_columns(vec![("list_col", "array(array(integer))")]);
+        let schema = create_test_schema(vec![("list_col", "array(array(integer))")]);
 
         let rows = vec![
             vec![json!([[1, 2, 3], [4, 5], [6]])],
@@ -2609,7 +2608,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_list_of_strings_array(
             &result,
@@ -2624,34 +2623,9 @@ mod tests {
     }
 
     #[test]
-    fn test_list_of_maps() {
-        let columns = create_test_columns(vec![("list_col", "array(map(string, integer))")]);
-
-        let rows = vec![
-            vec![json!([{"key1": 1, "key2": 2}, {"key3": 3}])],
-            vec![json!([{"single_key": 42}])],
-            vec![json!([])],
-            vec![Value::Null],
-        ];
-
-        let result = rows_to_arrow(&rows, columns).unwrap();
-
-        assert_list_of_strings_array(
-            &result,
-            0,
-            vec![
-                Some(vec![r#"{"key1":1,"key2":2}"#, r#"{"key3":3}"#]),
-                Some(vec![r#"{"single_key":42}"#]),
-                Some(vec![]),
-                None,
-            ],
-        );
-    }
-
-    #[test]
     fn test_list_of_structs() {
-        let columns =
-            create_test_columns(vec![("list_col", "array(row(name varchar, age integer))")]);
+        let schema =
+            create_test_schema(vec![("list_col", "array(row(name varchar, age integer))")]);
 
         let rows = vec![
             vec![json!([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])],
@@ -2660,7 +2634,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_list_of_strings_array(
             &result,
@@ -2679,7 +2653,7 @@ mod tests {
 
     #[test]
     fn test_struct() {
-        let columns = create_test_columns(vec![("struct_col", "row(name varchar, age integer)")]);
+        let schema = create_test_schema(vec![("struct_col", "row(name varchar, age integer)")]);
 
         let rows = vec![
             vec![json!({"name": "Alice", "age": 30})],
@@ -2687,7 +2661,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_struct_array(
             &result,
@@ -2702,7 +2676,7 @@ mod tests {
 
     #[test]
     fn test_struct_with_list() {
-        let columns = create_test_columns(vec![(
+        let schema = create_test_schema(vec![(
             "struct_col",
             "row(name varchar, tags array(varchar))",
         )]);
@@ -2714,7 +2688,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_struct_array(
             &result,
@@ -2729,37 +2703,8 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_with_map() {
-        let columns = create_test_columns(vec![(
-            "struct_col",
-            "row(name varchar, scores map(varchar, integer))",
-        )]);
-
-        let rows = vec![
-            vec![json!({"name": "Alice", "scores": {"math": 95, "science": 87}})],
-            vec![json!({"name": "Bob", "scores": {"english": 92}})],
-            vec![json!({"name": "Charlie", "scores": {}})], // empty map
-            vec![Value::Null],
-        ];
-
-        let result = rows_to_arrow(&rows, columns).unwrap();
-        assert_eq!(result.num_rows(), 4);
-
-        assert_struct_array(
-            &result,
-            0,
-            vec![
-                Some(json!({"name": "Alice", "scores": "{\"math\":95,\"science\":87}"})),
-                Some(json!({"name": "Bob", "scores": "{\"english\":92}"})),
-                Some(json!({"name": "Charlie", "scores": "{}"})),
-                None,
-            ],
-        );
-    }
-
-    #[test]
     fn test_struct_with_nested_struct() {
-        let columns = create_test_columns(vec![(
+        let schema = create_test_schema(vec![(
             "struct_col",
             "row(name varchar, address row(street varchar, city varchar))",
         )]);
@@ -2773,7 +2718,7 @@ mod tests {
             vec![Value::Null],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
 
         assert_struct_array(
             &result,
@@ -2792,109 +2737,8 @@ mod tests {
     }
 
     #[test]
-    fn test_map_type() {
-        let columns = create_test_columns(vec![("map_col", "map(varchar, integer)")]);
-
-        let rows = vec![
-            vec![json!({"key1": 1, "key2": 2})],
-            vec![json!([{"key": "key3", "value": 3}])],
-            vec![Value::Null],
-        ];
-
-        let result = rows_to_arrow(&rows, columns).unwrap();
-        assert_eq!(result.num_rows(), 3);
-
-        assert_string_array_with_nulls(
-            &result,
-            0,
-            vec![
-                Some(r#"{"key1":1,"key2":2}"#),
-                Some(r#"[{"key":"key3","value":3}]"#),
-                None,
-            ],
-        );
-    }
-
-    #[test]
-    fn test_map_with_list() {
-        let columns = create_test_columns(vec![("map_col", "map(varchar, array(varchar))")]);
-
-        let rows = vec![
-            vec![json!({"key1": ["item1", "item2"], "key2": ["item3"]})],
-            vec![json!({"key3": []})],
-            vec![Value::Null],
-        ];
-
-        let result = rows_to_arrow(&rows, columns).unwrap();
-        assert_eq!(result.num_rows(), 3);
-
-        assert_string_array_with_nulls(
-            &result,
-            0,
-            vec![
-                Some(r#"{"key1":["item1","item2"],"key2":["item3"]}"#),
-                Some(r#"{"key3":[]}"#),
-                None,
-            ],
-        );
-    }
-
-    #[test]
-    fn test_map_with_struct() {
-        let columns = create_test_columns(vec![(
-            "map_col",
-            "map(varchar, row(name varchar, age integer))",
-        )]);
-
-        let rows = vec![
-            vec![
-                json!({"person1": {"name": "Alice", "age": 30}, "person2": {"name": "Bob", "age": 25}}),
-            ],
-            vec![json!({"person3": {"name": "Charlie", "age": 35}})],
-            vec![Value::Null],
-        ];
-
-        let result = rows_to_arrow(&rows, columns).unwrap();
-        assert_eq!(result.num_rows(), 3);
-
-        assert_string_array_with_nulls(
-            &result,
-            0,
-            vec![
-                Some(r#"{"person1":{"age":30,"name":"Alice"},"person2":{"age":25,"name":"Bob"}}"#),
-                Some(r#"{"person3":{"age":35,"name":"Charlie"}}"#),
-                None,
-            ],
-        );
-    }
-
-    #[test]
-    fn test_map_with_map() {
-        let columns = create_test_columns(vec![("map_col", "map(varchar, map(varchar, integer))")]);
-
-        let rows = vec![
-            vec![json!({"outer1": {"inner1": 1, "inner2": 2}, "outer2": {"inner3": 3}})],
-            vec![json!({"outer3": {}})],
-            vec![Value::Null],
-        ];
-
-        let result = rows_to_arrow(&rows, columns).unwrap();
-        assert_eq!(result.num_rows(), 3);
-
-        assert_string_array_with_nulls(
-            &result,
-            0,
-            vec![
-                Some(r#"{"outer1":{"inner1":1,"inner2":2},"outer2":{"inner3":3}}"#),
-                Some(r#"{"outer3":{}}"#),
-                None,
-            ],
-        );
-    }
-
-    #[test]
     fn test_integer_overflow_handling() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("int8_col", "tinyint"),
             ("int16_col", "smallint"),
             ("int32_col", "integer"),
@@ -2906,7 +2750,7 @@ mod tests {
             json!(9223372036854775807i64),
         ]];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 1);
 
         let int8_array = result
@@ -2933,7 +2777,7 @@ mod tests {
 
     #[test]
     fn test_type_coercion_fallback() {
-        let columns = create_test_columns(vec![
+        let schema = create_test_schema(vec![
             ("bool_col", "boolean"),
             ("int_col", "integer"),
             ("string_col", "varchar"),
@@ -2945,7 +2789,7 @@ mod tests {
             json!(42),
         ]];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 1);
 
         let bool_array = result
@@ -2973,14 +2817,14 @@ mod tests {
 
     #[test]
     fn test_large_dataset() {
-        let columns = create_test_columns(vec![("id", "bigint"), ("value", "varchar")]);
+        let schema = create_test_schema(vec![("id", "bigint"), ("value", "varchar")]);
 
         let mut rows = Vec::new();
         for i in 0..1000 {
             rows.push(vec![json!(i), json!(format!("value_{}", i))]);
         }
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 1000);
         assert_eq!(result.num_columns(), 2);
 
@@ -3003,8 +2847,8 @@ mod tests {
 
     #[test]
     fn test_mixed_null_and_valid_data() {
-        let columns =
-            create_test_columns(vec![("mixed_int", "integer"), ("mixed_string", "varchar")]);
+        let schema =
+            create_test_schema(vec![("mixed_int", "integer"), ("mixed_string", "varchar")]);
 
         let rows = vec![
             vec![json!(1), json!("first")],
@@ -3014,7 +2858,7 @@ mod tests {
             vec![json!(5), json!("fifth")],
         ];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 5);
 
         let int_array = result
@@ -3036,10 +2880,10 @@ mod tests {
 
     #[test]
     fn test_null_builder_type() {
-        let columns = create_test_columns(vec![("null_col", "null")]);
+        let schema = create_test_schema(vec![("null_col", "null")]);
         let rows = vec![vec![Value::Null], vec![Value::Null]];
 
-        let result = rows_to_arrow(&rows, columns).unwrap();
+        let result = rows_to_arrow(&rows, schema).unwrap();
         assert_eq!(result.num_rows(), 2);
         assert_eq!(result.num_columns(), 1);
 
