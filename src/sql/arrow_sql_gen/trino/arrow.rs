@@ -75,7 +75,7 @@ fn create_arrow_builder_for_field(field: &Field, capacity: usize) -> Result<Box<
         DataType::Utf8 => Ok(Box::new(StringBuilder::with_capacity(capacity, 1024))),
         DataType::Binary => Ok(Box::new(BinaryBuilder::with_capacity(capacity, 1024))),
         DataType::Date32 => Ok(Box::new(Date32Builder::with_capacity(capacity))),
-        DataType::Time32(TimeUnit::Second | TimeUnit::Millisecond) => {
+        DataType::Time32(TimeUnit::Millisecond) => {
             Ok(Box::new(Time32MillisecondBuilder::with_capacity(capacity)))
         }
         DataType::Time64(TimeUnit::Microsecond) => {

@@ -80,6 +80,7 @@ pub struct TrinoConnectionPool {
     join_push_down: JoinPushDown,
     unsupported_type_action: UnsupportedTypeAction,
     poll_wait_time: Duration,
+    tz: Option<String>,
 }
 
 impl std::fmt::Debug for TrinoConnectionPool {
@@ -111,6 +112,7 @@ impl TrinoConnectionPool {
     ///   * `identity_pem_path` - Path to a PEM file containing both the client certificate and private key for mTLS authentication. (optional)
     ///   * `bearer_token` - Bearer token for authentication (optional)
     ///   * `poll_wait_time_ms` - Waiting time in ms between polling trino results (optional, defaults to 50)
+    ///   * `time_zone` - The time zone to use for the MySQL connection (e.g., "+2:00", "UTC", etc.). Default is "+00:00" (UTC).
     ///
     /// # Errors
     ///
@@ -165,6 +167,7 @@ impl TrinoConnectionPool {
             join_push_down,
             unsupported_type_action: UnsupportedTypeAction::default(),
             poll_wait_time: Duration::from_millis(poll_wait_time),
+            tz: params.get("time_zone").map(|t| t.expose_secret().to_string()),
         })
     }
 
@@ -219,6 +222,7 @@ impl DbConnectionPool<Arc<Client>, &'static str> for TrinoConnectionPool {
             self.client.clone(),
             self.base_url.clone(),
             self.poll_wait_time,
+            self.tz.clone(),
         )
         .with_unsupported_type_action(self.unsupported_type_action);
 

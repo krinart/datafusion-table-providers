@@ -14,7 +14,6 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::sql::TableReference;
-use futures::stream;
 use futures::Stream;
 use futures::StreamExt;
 use serde_json::Value;
@@ -60,6 +59,7 @@ pub struct TrinoConnection {
     base_url: String,
     unsupported_type_action: UnsupportedTypeAction,
     poll_wait_time: Duration,
+    tz: Option<String>,
 }
 
 impl<'a> DbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
@@ -84,6 +84,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
             base_url: String::new(),
             unsupported_type_action: UnsupportedTypeAction::default(),
             poll_wait_time: Duration::from_millis(DEFAULT_POLL_WAIT_TIME_MS),
+            tz: None,
         }
     }
 
@@ -91,10 +92,13 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         &self,
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
+
         let sql = format!("DESCRIBE {table_reference}");
         let mut query_stream = self.execute_query(&sql);
 
         let mut fields = Vec::new();
+
+        // let tz: Option<String> = self.tz.clone();
 
         while let Some(batch_data) = query_stream.next().await {
             let batch_data = batch_data.map_err(|e| super::Error::UnableToGetSchema {
@@ -127,7 +131,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                         true
                     };
 
-                    let Ok(arrow_type) = trino_data_type_to_arrow_type(data_type) else {
+                    let Ok(arrow_type) = trino_data_type_to_arrow_type(data_type, self.tz.clone().as_deref()) else {
                         return Err(super::Error::UnsupportedDataType {
                             data_type: data_type.to_string(),
                             field_name: column_name.to_string(),
@@ -185,7 +189,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
     }
 
     async fn execute(&self, _query: &str, _params: &[&'a str]) -> Result<u64> {
-        todo!()
+        unimplemented!("Execute not implemented for Trino");
     }
 }
 
@@ -194,12 +198,14 @@ impl TrinoConnection {
         client: Arc<reqwest::Client>,
         base_url: String,
         poll_wait_time: Duration,
+        tz: Option<String>,
     ) -> Self {
         TrinoConnection {
             client,
             base_url,
             unsupported_type_action: UnsupportedTypeAction::default(),
             poll_wait_time,
+            tz,
         }
     }
 
