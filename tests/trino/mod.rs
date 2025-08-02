@@ -26,7 +26,7 @@ async fn test_trino_datetime_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(create_table_sql)
+        .execute(create_table_sql)
         .await
         .expect("Table should be created");
 
@@ -36,7 +36,7 @@ async fn test_trino_datetime_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(insert_sql)
+        .execute(insert_sql)
         .await
         .expect("Data should be inserted");
 
@@ -84,7 +84,7 @@ async fn test_trino_numeric_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(create_table_sql)
+        .execute(create_table_sql)
         .await
         .expect("Table should be created");
 
@@ -94,7 +94,7 @@ async fn test_trino_numeric_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(insert_sql)
+        .execute(insert_sql)
         .await
         .expect("Data should be inserted");
 
@@ -137,7 +137,7 @@ async fn test_trino_string_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(create_table_sql)
+        .execute(create_table_sql)
         .await
         .expect("Table should be created");
 
@@ -148,7 +148,7 @@ async fn test_trino_string_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(insert_sql)
+        .execute(insert_sql)
         .await
         .expect("Data should be inserted");
 
@@ -188,7 +188,7 @@ async fn test_trino_boolean_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(create_table_sql)
+        .execute(create_table_sql)
         .await
         .expect("Table should be created");
 
@@ -199,7 +199,7 @@ async fn test_trino_boolean_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(insert_sql)
+        .execute(insert_sql)
         .await
         .expect("Data should be inserted");
 
@@ -235,7 +235,7 @@ async fn test_trino_binary_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(create_table_sql)
+        .execute(create_table_sql)
         .await
         .expect("Table should be created");
 
@@ -245,7 +245,7 @@ async fn test_trino_binary_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(insert_sql)
+        .execute(insert_sql)
         .await
         .expect("Data should be inserted");
 
@@ -280,7 +280,7 @@ async fn test_trino_array_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(create_table_sql)
+        .execute(create_table_sql)
         .await
         .expect("Table should be created");
 
@@ -291,7 +291,7 @@ async fn test_trino_array_types(port: usize) {
     "#;
 
     client
-        .execute_ddl(insert_sql)
+        .execute(insert_sql)
         .await
         .expect("Data should be inserted");
 
@@ -373,7 +373,7 @@ async fn test_trino_null_and_missing_fields(port: usize) {
     "#;
 
     client
-        .execute_ddl(create_table_sql)
+        .execute(create_table_sql)
         .await
         .expect("Table should be created");
 
@@ -385,7 +385,7 @@ async fn test_trino_null_and_missing_fields(port: usize) {
     "#;
 
     client
-        .execute_ddl(insert_sql)
+        .execute(insert_sql)
         .await
         .expect("Data should be inserted");
 
