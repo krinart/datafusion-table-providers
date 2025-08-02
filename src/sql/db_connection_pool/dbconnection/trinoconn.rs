@@ -285,7 +285,7 @@ impl TrinoConnection {
                     if state != "FINISHED" {
                         Err(Error::TrinoServerError {
                             status_code: 500,
-                            message: format!("Query stuck in state: {}", state),
+                            message: format!("Query stuck in state: {state}"),
                         })?;
                     }
                     break;
