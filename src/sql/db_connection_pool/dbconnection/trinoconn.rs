@@ -92,7 +92,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
         table_reference: &TableReference,
     ) -> Result<SchemaRef, super::Error> {
         let sql = format!("DESCRIBE {table_reference}");
-        let mut query_stream = self.execute_query_stream(&sql);
+        let mut query_stream = self.execute_query(&sql);
 
         let mut fields = Vec::new();
 
@@ -151,7 +151,9 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
     ) -> Result<SendableRecordBatchStream> {
         let schema_ref = projected_schema.ok_or(Error::NoSchema)?;
 
-        let mut query_stream = self.execute_query_stream(sql);
+        let mut query_stream = self.execute_query(sql);
+
+        let schema_for_stream = Arc::clone(&schema_ref);
 
         let mut arrow_stream = Box::pin(stream! {
             while let Some(batch_data) = query_stream.next().await {
@@ -162,7 +164,7 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
                 if !batch_data.is_empty() {
                     let chunk_size = 4_000;
                     for chunk in batch_data.chunks(chunk_size) {
-                        let rec = rows_to_arrow(chunk, Arc::clone(&schema_ref))
+                        let rec = rows_to_arrow(chunk, Arc::clone(&schema_for_stream))
                             .map_err(|e| super::Error::UnableToQueryArrow {
                                 source: Box::new(Error::ConversionError { source: e }),
                             })?;
@@ -172,19 +174,8 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
             }
         });
 
-        let Some(first_chunk) = arrow_stream.next().await else {
-            return Ok(Box::pin(RecordBatchStreamAdapter::new(
-                Arc::new(Schema::empty()),
-                stream::empty(),
-            )));
-        };
-
-        let first_chunk = first_chunk?;
-        let schema = first_chunk.schema();
-
-        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, {
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema_ref, {
             stream! {
-                yield Ok(first_chunk);
                 while let Some(batch) = arrow_stream.next().await {
                     yield batch
                         .map_err(|e| DataFusionError::Execution(format!("Failed to fetch batch: {e}")))
@@ -218,7 +209,7 @@ impl TrinoConnection {
         self
     }
 
-    fn execute_query_stream(&self, sql: &str) -> QueryStream {
+    fn execute_query(&self, sql: &str) -> QueryStream {
         let client = self.client.clone();
         let url = format!("{}/v1/statement", self.base_url);
         let poll_wait_time = self.poll_wait_time;
