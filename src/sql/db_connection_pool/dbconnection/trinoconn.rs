@@ -97,8 +97,6 @@ impl<'a> AsyncDbConnection<Arc<reqwest::Client>, &'a str> for TrinoConnection {
 
         let mut fields = Vec::new();
 
-        // let tz: Option<String> = self.tz.clone();
-
         while let Some(batch_data) = query_stream.next().await {
             let batch_data = batch_data.map_err(|e| super::Error::UnableToGetSchema {
                 source: Box::new(e),
