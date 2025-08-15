@@ -19,7 +19,7 @@ mod trino;
 
 fn container_registry() -> String {
     std::env::var("CONTAINER_REGISTRY")
-        .unwrap_or_else(|_| "public.ecr.aws/docker/library/".to_string())
+        .unwrap_or_else(|_| "public.ecr.aws/docker/library".to_string())
 }
 
 fn get_random_port() -> usize {
